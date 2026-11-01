@@ -30,7 +30,21 @@ Categorias "revisar" começam desmarcadas. Dá para expandir cada categoria e de
 
 Algumas pastas (Mail, backups) exigem **Acesso Total ao Disco**: Ajustes > Privacidade e Segurança > Acesso Total ao Disco > adicione o app (ou o Terminal, se rodar via `cargo run`).
 
-## Uso
+## Instalar com Homebrew
+
+```bash
+brew tap 1985epma/systemdata
+```
+
+```bash
+brew install epma-system-data
+```
+
+```bash
+epma-system-data
+```
+
+## Rodar a partir do código
 
 Requer Rust (`brew install rust` ou [rustup](https://rustup.rs)).
 
