@@ -6,7 +6,7 @@ description = "Limpeza de System Data no macOS com interface nativa em Rust"
 license = "MIT"
 
 [dependencies]
-eframe = "0.29"
+eframe = "0.37"
 walkdir = "2"
 trash = "5"
 dirs = "5"
