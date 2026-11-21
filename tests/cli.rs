@@ -261,3 +261,29 @@ fn closed_stdout_pipe_does_not_panic() {
     assert!(output.status.success());
     assert!(!String::from_utf8_lossy(&output.stderr).contains("panicked"));
 }
+
+#[test]
+fn diag_json_is_stable_and_read_only() {
+    let home = fixture();
+    let before = fs::read_dir(home.path().join("Library/Caches")).unwrap().count();
+    let out = bin(home.path()).args(["diag", "--json"]).output().unwrap();
+    // 0 (sem achado crítico) ou 1 (há achado crítico): nunca 2 ou 3.
+    assert!(matches!(out.status.code(), Some(0) | Some(1)), "{:?}", out.status);
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(["macos", "linux"].contains(&v["os"].as_str().unwrap()));
+    for key in ["disks", "volumes", "findings", "notes"] {
+        assert!(v[key].is_array(), "faltou `{key}`");
+    }
+    // stdout só tem o JSON; o progresso vai para o stderr.
+    assert!(!String::from_utf8_lossy(&out.stdout).contains("Diagnosticando"));
+    assert_eq!(fs::read_dir(home.path().join("Library/Caches")).unwrap().count(), before);
+}
+
+#[test]
+fn diag_human_output_has_sections() {
+    let home = fixture();
+    let out = bin(home.path()).arg("diag").output().unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("Diagnóstico de discos"), "{text}");
+    assert!(text.contains("Achados"), "{text}");
+}

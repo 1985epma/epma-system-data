@@ -30,6 +30,7 @@ use serde::Serialize;
 
 use crate::categories::{self, Category, Risk, Target};
 use crate::cleaner::{self, CleanReport, Mode};
+use crate::diag::{self, DiskKind, Severity, SmartStatus};
 use crate::plan;
 use crate::scanner::{self, Entry, ScanResult};
 use crate::util::{disk_space, display_path, format_bytes};
@@ -90,6 +91,8 @@ enum Cmd {
     Scan(ScanArgs),
     /// Mostra o uso do disco.
     Disk(JsonArgs),
+    /// Diagnóstico de discos (macOS e Linux): volumes, inodes, discos físicos e saúde SMART.
+    Diag(JsonArgs),
     /// Limpa categorias (Lixeira por padrão; pede confirmação).
     Clean(CleanArgs),
     /// Mostra um item no Finder.
@@ -205,6 +208,7 @@ where
         Cmd::List(a) => cmd_list(&ui, &a),
         Cmd::Scan(a) => cmd_scan(&ui, &a),
         Cmd::Disk(a) => cmd_disk(&ui, &a),
+        Cmd::Diag(a) => cmd_diag(&ui, &a),
         Cmd::Clean(a) => cmd_clean(&ui, &a),
         Cmd::Reveal { path } => cmd_reveal(&path),
         Cmd::Completions { shell } => {
@@ -535,6 +539,131 @@ fn cmd_disk(_ui: &Ui, a: &JsonArgs) -> Res {
         emit(&format!("{}\n", disk_line(&d)));
     }
     Ok(0)
+}
+
+// ------------------------------------------------------------- diag
+
+fn severity_tone(s: Severity) -> Tone {
+    match s {
+        Severity::Info => Tone::Dim,
+        Severity::Warning => Tone::Amber,
+        Severity::Critical => Tone::Red,
+    }
+}
+
+fn severity_label(s: Severity) -> &'static str {
+    match s {
+        Severity::Info => "info",
+        Severity::Warning => "aviso",
+        Severity::Critical => "crítico",
+    }
+}
+
+fn smart_cell(s: SmartStatus) -> Cell {
+    match s {
+        SmartStatus::Passed => tone("ok", Tone::Green),
+        SmartStatus::Failing => tone("FALHANDO", Tone::Red),
+        SmartStatus::NotSupported => tone("sem suporte", Tone::Dim),
+        SmartStatus::Unknown => tone("não lido", Tone::Amber),
+    }
+}
+
+fn cmd_diag(ui: &Ui, a: &JsonArgs) -> Res {
+    ui.info("Diagnosticando discos…");
+    let report = diag::collect();
+    let code = if report.worst() == Some(Severity::Critical) { EXIT_FAILED } else { 0 };
+    if a.json {
+        emit_json(&report);
+        return Ok(code);
+    }
+
+    let mut out = String::new();
+    let os = match report.os {
+        "macos" => "macOS",
+        "linux" => "Linux",
+        other => other,
+    };
+    let _ = writeln!(out, "{}\n", ui.paint(Tone::Bold, &format!("Diagnóstico de discos — {os}")));
+
+    if !report.disks.is_empty() {
+        let rows: Vec<Vec<Cell>> = report
+            .disks
+            .iter()
+            .map(|d| {
+                let kind = match d.kind {
+                    DiskKind::Ssd => "SSD",
+                    DiskKind::Hdd => "HDD",
+                    DiskKind::Unknown => "?",
+                };
+                let place = match (d.internal, d.removable) {
+                    (_, true) => "removível",
+                    (Some(true), _) => "interno",
+                    (Some(false), _) => "externo",
+                    (None, _) => "—",
+                };
+                vec![
+                    cell(&d.name),
+                    cell(d.model.clone().unwrap_or_else(|| "—".into())),
+                    cell(d.size_bytes.map_or("—".into(), format_bytes)),
+                    cell(kind),
+                    cell(place),
+                    cell(d.protocol.clone().unwrap_or_else(|| "—".into())),
+                    smart_cell(d.smart),
+                ]
+            })
+            .collect();
+        out.push_str(&ui.paint(Tone::Bold, "Discos físicos\n"));
+        out.push_str(&table(ui, &["DISCO", "MODELO", "TAMANHO", "TIPO", "LOCAL", "PROTOCOLO", "SMART"], &rows));
+        out.push('\n');
+    }
+
+    if !report.volumes.is_empty() {
+        let rows: Vec<Vec<Cell>> = report
+            .volumes
+            .iter()
+            .map(|v| {
+                let pct = v.used_percent();
+                let pct_tone = if pct >= diag::FULL_CRITICAL {
+                    Some(Tone::Red)
+                } else if pct >= diag::FULL_WARNING {
+                    Some(Tone::Amber)
+                } else {
+                    None
+                };
+                vec![
+                    cell(&v.mount),
+                    cell(&v.fstype),
+                    cell(format_bytes(v.total_bytes)),
+                    cell(format_bytes(v.free_bytes)),
+                    (format!("{pct:.0}%"), pct_tone),
+                    cell(v.inodes_used_percent().map_or("—".into(), |p| format!("{p:.0}%"))),
+                    cell(if v.read_only { "somente leitura" } else { "leitura e escrita" }),
+                    cell(&v.device),
+                ]
+            })
+            .collect();
+        out.push_str(&ui.paint(Tone::Bold, "Volumes\n"));
+        out.push_str(&table(ui, &["MONTAGEM", "FS", "TOTAL", "LIVRE", "USO", "INODES", "MODO", "DISPOSITIVO"], &rows));
+        out.push('\n');
+    }
+
+    out.push_str(&ui.paint(Tone::Bold, "Achados\n"));
+    if report.findings.is_empty() {
+        let _ = writeln!(out, "{}", ui.paint(Tone::Green, "Nenhum problema encontrado."));
+    } else {
+        let rows: Vec<Vec<Cell>> = report
+            .findings
+            .iter()
+            .map(|f| vec![tone(severity_label(f.severity), severity_tone(f.severity)), cell(&f.subject), cell(&f.message)])
+            .collect();
+        out.push_str(&table(ui, &["NÍVEL", "ONDE", "O QUE"], &rows));
+    }
+    for note in &report.notes {
+        let _ = writeln!(out, "{}", ui.paint(Tone::Dim, &format!("nota: {note}")));
+    }
+    let _ = writeln!(out, "{}", ui.paint(Tone::Dim, "\nSomente leitura: o diagnóstico não altera nada. Código de saída 1 se houver achado crítico."));
+    emit(&out);
+    Ok(code)
 }
 
 // ------------------------------------------------------------- scan

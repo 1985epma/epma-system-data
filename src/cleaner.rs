@@ -4,6 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[cfg(target_os = "macos")]
 use trash::macos::{DeleteMethod, TrashContextExtMacos};
 use trash::TrashContext;
 
@@ -43,8 +44,10 @@ pub fn clean_entries(entries: &[Entry], mode: Mode) -> CleanReport {
 
 pub fn clean_entries_within(entries: &[Entry], mode: Mode, home: &Path) -> CleanReport {
     let mut report = CleanReport::default();
+    #[allow(unused_mut)] // só o macOS ajusta o método de remoção
     let mut ctx = TrashContext::default();
     // NSFileManager evita o prompt de automação do Finder.
+    #[cfg(target_os = "macos")]
     ctx.set_delete_method(DeleteMethod::NsFileManager);
 
     for entry in entries {

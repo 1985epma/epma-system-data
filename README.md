@@ -77,6 +77,7 @@ Tudo o que a janela faz também roda no terminal. Sem argumentos abre a janela; 
 | Janela "Confirmar limpeza" | plano mostrado antes, pergunta `[s/N]` (`--yes` pula) |
 | Histórico | relatório por categoria ao fim do `clean` |
 | Botão "Finder" | `epma-system-data reveal CAMINHO` |
+| (só no terminal) Diagnóstico de discos | `epma-system-data diag` |
 
 Dica: rode `list` para ver os `ID`s das categorias.
 
@@ -102,7 +103,7 @@ Limpar só os backups de iPhone/iPad, de vez:
 epma-system-data clean --only ios_backups --permanent
 ```
 
-Outras opções: `--json` (saída estável para scripts, em `list`, `scan`, `disk` e `clean`), `--quiet`, `--no-color` (também vale `NO_COLOR`) e `epma-system-data completions zsh|bash|fish` para autocompletar. `--scan` continua funcionando como alias de `scan`.
+Outras opções: `--json` (saída estável para scripts, em `list`, `scan`, `disk`, `diag` e `clean`), `--quiet`, `--no-color` (também vale `NO_COLOR`) e `epma-system-data completions zsh|bash|fish` para autocompletar. `--scan` continua funcionando como alias de `scan`.
 
 Segurança no terminal:
 
@@ -114,9 +115,33 @@ Segurança no terminal:
 | Código | Significado |
 |---|---|
 | 0 | Sucesso (inclui ensaio e "nada para limpar") |
-| 1 | Limpeza com falhas parciais (ex.: falta Acesso Total ao Disco) |
+| 1 | Limpeza com falhas parciais (ex.: falta Acesso Total ao Disco), ou `diag` com achado crítico |
 | 2 | Uso incorreto (flag ou id de categoria inválido) |
 | 3 | Recusado: pediria confirmação, mas não há terminal e faltou `--yes` |
+
+## Diagnóstico de discos (macOS e Linux)
+
+```bash
+epma-system-data diag
+```
+
+Somente leitura: não altera nada. Mostra os discos físicos, os volumes e uma lista de achados.
+
+| Parte | macOS | Linux |
+|---|---|---|
+| Discos físicos (modelo, tamanho, SSD ou HDD, interno ou externo) | `diskutil` | `/sys/block` |
+| Saúde SMART | `diskutil info` (já vem no sistema) | `smartctl -H` do smartmontools, **precisa de `sudo`** |
+| Volumes (espaço, inodes, somente leitura) | `getmntinfo` | `/proc/self/mounts` e `statvfs` |
+
+| Achado | Nível | Regra |
+|---|---|---|
+| Volume cheio | aviso a partir de 90%, crítico a partir de 95% | Calculado como o `df`. Volumes somente leitura (ISO, imagem de disco) e volumes APFS do mesmo container não repetem o aviso |
+| Inodes quase esgotados | aviso 90%, crítico 95% | Dá para ficar sem criar arquivos mesmo com espaço livre |
+| Montado somente leitura | aviso | Só no Linux: lá costuma indicar erro no sistema de arquivos. No macOS é normal (raiz selada, imagens de disco) |
+| SMART reporta falha | crítico | Faça backup e planeje trocar o disco |
+| SMART não lido | info | Falta `smartctl` ou permissão; a nota diz o que fazer |
+
+Com achado crítico o código de saída é 1, então dá para usar em agendamento. `--json` traz os mesmos dados. No Linux, instale `smartmontools` (`apt install smartmontools`) e rode `sudo epma-system-data diag` para ver o SMART.
 
 ## Estrutura
 
@@ -124,6 +149,7 @@ Segurança no terminal:
 src/
   main.rs        entrada: janela ou CLI
   cli.rs         comandos de terminal (clap)
+  diag.rs        diagnóstico de discos (macOS e Linux)
   plan.rs        seleção e relatório compartilhados pela janela e pelo CLI
   app.rs         interface egui
   categories.rs  o que é limpo e onde
