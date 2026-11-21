@@ -9,7 +9,7 @@ license = "MIT"
 eframe = "0.29"
 walkdir = "2"
 trash = "5"
-dirs = "5"
+dirs = "7"
 libc = "0.2"
 clap = { version = "4.6.9", features = ["derive", "env"] }
 clap_complete = "4.6.12"
