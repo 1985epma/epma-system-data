@@ -10,6 +10,7 @@ use eframe::egui::{self, Align, Align2, Color32, Layout, RichText};
 
 use crate::categories::{self, Category, Risk, Target};
 use crate::cleaner::{self, CleanReport, Mode};
+use crate::lock;
 use crate::plan;
 use crate::scanner::{self, Entry, ScanResult};
 use crate::util::{disk_space, display_path, format_bytes};
@@ -25,6 +26,8 @@ enum Msg {
     Scanned(usize, ScanResult),
     Cleaned(usize, CleanReport),
     CleanFinished,
+    /// Outra limpeza (outra janela ou o terminal) está rodando: nada foi feito.
+    Busy(String),
 }
 
 struct CatState {
@@ -51,7 +54,12 @@ impl CatState {
 
     /// Algo selecionado que de fato será limpo.
     fn has_work(&self) -> bool {
-        plan::has_work(&self.cat, self.scan.as_ref(), self.selected, &self.deselected)
+        plan::has_work(
+            &self.cat,
+            self.scan.as_ref(),
+            self.selected,
+            &self.deselected,
+        )
     }
 }
 
@@ -128,6 +136,15 @@ impl App {
         let tx = self.tx.clone();
         let ctx = ctx.clone();
         thread::spawn(move || {
+            // Uma limpeza por vez no usuário, mesmo entre janela, terminal e agendamento.
+            let _lock = match lock::acquire() {
+                Ok(lock) => lock,
+                Err(e) => {
+                    let _ = tx.send(Msg::Busy(e.to_string()));
+                    ctx.request_repaint();
+                    return;
+                }
+            };
             for (i, target, entries) in jobs {
                 let report = match target {
                     Target::DirContents { .. } => cleaner::clean_entries(&entries, mode),
@@ -156,6 +173,10 @@ impl App {
                     self.log_report(i, &report);
                     self.cats[i].deselected.clear();
                     self.scan_one(i, ctx);
+                }
+                Msg::Busy(text) => {
+                    self.cleaning = false;
+                    self.log.push(text);
                 }
                 Msg::CleanFinished => {
                     self.cleaning = false;
@@ -220,10 +241,16 @@ impl App {
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let label = RichText::new(format!("Limpar {}", format_bytes(total))).strong();
-                if ui.add_enabled(!busy && any_work, egui::Button::new(label)).clicked() {
+                if ui
+                    .add_enabled(!busy && any_work, egui::Button::new(label))
+                    .clicked()
+                {
                     confirm = true;
                 }
-                if ui.add_enabled(!busy, egui::Button::new("Escanear de novo")).clicked() {
+                if ui
+                    .add_enabled(!busy, egui::Button::new("Escanear de novo"))
+                    .clicked()
+                {
                     rescan = true;
                 }
                 if busy {
@@ -240,67 +267,86 @@ impl App {
         let state = &mut self.cats[i];
         let available = state.available();
 
-        egui::Frame::group(ui.style()).inner_margin(10.0).show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                ui.add_enabled(
-                    available && !locked,
-                    egui::Checkbox::new(&mut state.selected, RichText::new(state.cat.name).strong()),
-                );
-                let (badge, color) = match state.cat.risk {
-                    Risk::Safe => ("seguro", GREEN),
-                    Risk::Review => ("revisar", AMBER),
-                };
-                ui.label(RichText::new(badge).small().color(color));
+        egui::Frame::group(ui.style())
+            .inner_margin(10.0)
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.add_enabled(
+                        available && !locked,
+                        egui::Checkbox::new(
+                            &mut state.selected,
+                            RichText::new(state.cat.name).strong(),
+                        ),
+                    );
+                    let (badge, color) = match state.cat.risk {
+                        Risk::Safe => ("seguro", GREEN),
+                        Risk::Review => ("revisar", AMBER),
+                    };
+                    ui.label(RichText::new(badge).small().color(color));
 
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if state.scanning {
-                        ui.spinner();
-                    } else if let Some(scan) = &state.scan {
-                        if scan.items.is_some() || scan.unavailable {
-                            ui.label(RichText::new("—").weak());
-                        } else {
-                            ui.label(RichText::new(format_bytes(scan.total)).strong());
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if state.scanning {
+                            ui.spinner();
+                        } else if let Some(scan) = &state.scan {
+                            if scan.items.is_some() || scan.unavailable {
+                                ui.label(RichText::new("—").weak());
+                            } else {
+                                ui.label(RichText::new(format_bytes(scan.total)).strong());
+                            }
                         }
-                    }
+                    });
                 });
-            });
-            ui.label(RichText::new(state.cat.description).small().weak());
+                ui.label(RichText::new(state.cat.description).small().weak());
 
-            let Some(scan) = &state.scan else { return };
-            if let Some(note) = &scan.note {
-                let color = if scan.items.is_some() { GREEN } else { AMBER };
-                ui.label(RichText::new(note).small().color(color));
-            }
-            if scan.entries.is_empty() {
-                return;
-            }
-            egui::CollapsingHeader::new(format!("{} itens", scan.entries.len()))
-                .id_salt(state.cat.id)
-                .show(ui, |ui| {
-                    for entry in scan.entries.iter().take(VISIBLE_ENTRIES) {
-                        ui.horizontal(|ui| {
-                            let mut on = !state.deselected.contains(&entry.path);
-                            if ui.add_enabled(!locked, egui::Checkbox::without_text(&mut on)).changed() {
-                                if on {
-                                    state.deselected.remove(&entry.path);
-                                } else {
-                                    state.deselected.insert(entry.path.clone());
+                let Some(scan) = &state.scan else { return };
+                if let Some(note) = &scan.note {
+                    let color = if scan.items.is_some() { GREEN } else { AMBER };
+                    ui.label(RichText::new(note).small().color(color));
+                }
+                if scan.entries.is_empty() {
+                    return;
+                }
+                egui::CollapsingHeader::new(format!("{} itens", scan.entries.len()))
+                    .id_salt(state.cat.id)
+                    .show(ui, |ui| {
+                        for entry in scan.entries.iter().take(VISIBLE_ENTRIES) {
+                            ui.horizontal(|ui| {
+                                let mut on = !state.deselected.contains(&entry.path);
+                                if ui
+                                    .add_enabled(!locked, egui::Checkbox::without_text(&mut on))
+                                    .changed()
+                                {
+                                    if on {
+                                        state.deselected.remove(&entry.path);
+                                    } else {
+                                        state.deselected.insert(entry.path.clone());
+                                    }
                                 }
-                            }
-                            ui.add_sized([72.0, 18.0], egui::Label::new(format_bytes(entry.size)));
-                            if ui.small_button("Finder").on_hover_text("Mostrar no Finder").clicked() {
-                                let _ = Command::new("open").arg("-R").arg(&entry.path).spawn();
-                            }
-                            ui.add(egui::Label::new(display_path(&entry.path)).truncate());
-                        });
-                    }
-                    let hidden = scan.entries.len().saturating_sub(VISIBLE_ENTRIES);
-                    if hidden > 0 {
-                        ui.label(RichText::new(format!("… e mais {hidden} itens menores")).small().weak());
-                    }
-                });
-        });
+                                ui.add_sized(
+                                    [72.0, 18.0],
+                                    egui::Label::new(format_bytes(entry.size)),
+                                );
+                                if ui
+                                    .small_button("Finder")
+                                    .on_hover_text("Mostrar no Finder")
+                                    .clicked()
+                                {
+                                    let _ = Command::new("open").arg("-R").arg(&entry.path).spawn();
+                                }
+                                ui.add(egui::Label::new(display_path(&entry.path)).truncate());
+                            });
+                        }
+                        let hidden = scan.entries.len().saturating_sub(VISIBLE_ENTRIES);
+                        if hidden > 0 {
+                            ui.label(
+                                RichText::new(format!("… e mais {hidden} itens menores"))
+                                    .small()
+                                    .weak(),
+                            );
+                        }
+                    });
+            });
     }
 
     fn confirm_window(&mut self, ctx: &egui::Context) {
@@ -363,21 +409,23 @@ impl eframe::App for App {
             .inner;
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                for i in 0..self.cats.len() {
-                    self.category_card(ui, i);
-                    ui.add_space(6.0);
-                }
-                if !self.log.is_empty() {
-                    egui::CollapsingHeader::new("Histórico")
-                        .default_open(true)
-                        .show(ui, |ui| {
-                            for line in &self.log {
-                                ui.label(RichText::new(line).small().monospace());
-                            }
-                        });
-                }
-            });
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    for i in 0..self.cats.len() {
+                        self.category_card(ui, i);
+                        ui.add_space(6.0);
+                    }
+                    if !self.log.is_empty() {
+                        egui::CollapsingHeader::new("Histórico")
+                            .default_open(true)
+                            .show(ui, |ui| {
+                                for line in &self.log {
+                                    ui.label(RichText::new(line).small().monospace());
+                                }
+                            });
+                    }
+                });
         });
 
         if confirm {

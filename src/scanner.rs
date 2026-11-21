@@ -1,5 +1,6 @@
 //! Medição do espaço ocupado por cada categoria.
 
+use std::collections::HashSet;
 use std::fs;
 use std::io::ErrorKind;
 use std::os::unix::fs::MetadataExt;
@@ -9,6 +10,7 @@ use std::process::Command;
 use walkdir::WalkDir;
 
 use crate::categories::{Category, Probe, Target};
+use crate::util::real_dir_inside_home;
 
 #[derive(Clone, Debug)]
 pub struct Entry {
@@ -32,16 +34,35 @@ pub struct ScanResult {
 
 pub fn scan(cat: &Category) -> ScanResult {
     match &cat.target {
-        Target::DirContents { dirs, exclude } => scan_dirs(dirs, exclude),
+        Target::DirContents { dirs, exclude } => {
+            scan_dirs_within(dirs, exclude, dirs::home_dir().as_deref())
+        }
         Target::Command { probe, .. } => run_probe(probe),
     }
 }
 
 pub fn scan_dirs(dirs: &[PathBuf], exclude: &[&str]) -> ScanResult {
+    scan_dirs_within(dirs, exclude, None)
+}
+
+/// Com `home`, ignora (e avisa) diretórios que sejam links simbólicos para fora dela:
+/// a limpeza os recusaria de qualquer jeito, e medi-los mostraria um número enganoso.
+pub fn scan_dirs_within(dirs: &[PathBuf], exclude: &[&str], home: Option<&Path>) -> ScanResult {
     let mut res = ScanResult::default();
     let mut denied = false;
+    let mut notes: Vec<String> = Vec::new();
 
     for dir in dirs {
+        if let Some(home) = home {
+            if fs::canonicalize(dir).is_ok() && !real_dir_inside_home(dir, home) {
+                res.errors += 1;
+                notes.push(format!(
+                    "{} aponta (link simbólico) para fora da sua pasta de usuário e foi ignorada.",
+                    crate::util::display_path(dir)
+                ));
+                continue;
+            }
+        }
         let read = match fs::read_dir(dir) {
             Ok(read) => read,
             Err(e) if e.kind() == ErrorKind::NotFound => continue,
@@ -65,20 +86,36 @@ pub fn scan_dirs(dirs: &[PathBuf], exclude: &[&str]) -> ScanResult {
     res.entries.sort_by_key(|e| std::cmp::Reverse(e.size));
     res.total = res.entries.iter().map(|e| e.size).sum();
     if denied {
-        res.note = Some(
+        notes.push(
             "Sem permissão de leitura. Conceda Acesso Total ao Disco em Ajustes > Privacidade e Segurança."
                 .into(),
         );
+    }
+    if !notes.is_empty() {
+        res.note = Some(notes.join(" "));
     }
     res
 }
 
 /// Soma o tamanho em disco de um arquivo ou árvore, sem seguir links simbólicos.
+///
+/// Arquivo com vários hard links (comum em `node_modules` de pnpm e em caches do Xcode)
+/// conta uma vez só por árvore. Clones do APFS (`clonefile`) não aparecem no `stat` e
+/// continuam somando por inteiro: o número pode ficar acima do espaço realmente liberado.
 pub fn dir_size(path: &Path, errors: &mut usize) -> u64 {
     let mut total = 0;
+    let mut seen_links: HashSet<(u64, u64)> = HashSet::new();
     for entry in WalkDir::new(path).follow_links(false) {
         match entry.and_then(|e| e.metadata()) {
-            Ok(meta) => total += meta.blocks() * 512,
+            Ok(meta) => {
+                if meta.nlink() > 1
+                    && !meta.is_dir()
+                    && !seen_links.insert((meta.dev(), meta.ino()))
+                {
+                    continue;
+                }
+                total += meta.blocks() * 512;
+            }
             Err(_) => *errors += 1,
         }
     }
@@ -138,6 +175,48 @@ mod tests {
         assert!(res.entries[0].size >= 64 * 1024);
         assert_eq!(res.total, res.entries.iter().map(|e| e.size).sum::<u64>());
         assert!(res.note.is_none());
+    }
+
+    #[test]
+    fn hard_links_are_counted_once_per_tree() {
+        let tmp = tempfile::tempdir().unwrap();
+        let single = tmp.path().join("single");
+        let linked = tmp.path().join("linked");
+        fs::create_dir_all(&single).unwrap();
+        fs::create_dir_all(&linked).unwrap();
+        fs::write(single.join("big.bin"), vec![1u8; 256 * 1024]).unwrap();
+        fs::write(linked.join("big.bin"), vec![1u8; 256 * 1024]).unwrap();
+        fs::hard_link(linked.join("big.bin"), linked.join("copia.bin")).unwrap();
+        fs::hard_link(linked.join("big.bin"), linked.join("outra.bin")).unwrap();
+
+        let mut errors = 0;
+        let one = dir_size(&single, &mut errors);
+        let three = dir_size(&linked, &mut errors);
+        assert_eq!(errors, 0);
+        // Três nomes para o mesmo arquivo: o mesmo espaço de um só (sobra só o diretório).
+        assert!(
+            three < one + 64 * 1024,
+            "{three} vs {one}: hard links foram somados"
+        );
+    }
+
+    #[test]
+    fn symlinked_category_dir_outside_home_is_ignored_with_a_note() {
+        let home = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        fs::create_dir_all(outside.path().join("alvo/sub")).unwrap();
+        fs::write(outside.path().join("alvo/sub/a.bin"), vec![1u8; 4096]).unwrap();
+        fs::create_dir_all(home.path().join("Library")).unwrap();
+        let caches = home.path().join("Library/Caches");
+        std::os::unix::fs::symlink(outside.path().join("alvo"), &caches).unwrap();
+
+        let res = scan_dirs_within(std::slice::from_ref(&caches), &[], Some(home.path()));
+        assert!(res.entries.is_empty());
+        assert_eq!(res.total, 0);
+        assert!(res.note.as_deref().unwrap().contains("link simbólico"));
+
+        // Sem `home` (uso interno e testes) o comportamento antigo continua.
+        assert_eq!(scan_dirs_within(&[caches], &[], None).entries.len(), 1);
     }
 
     #[test]

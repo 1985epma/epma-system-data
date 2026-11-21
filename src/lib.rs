@@ -5,6 +5,7 @@ pub mod categories;
 pub mod cleaner;
 pub mod cli;
 pub mod diag;
+pub mod lock;
 pub mod plan;
 pub mod scanner;
 pub mod util;

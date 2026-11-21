@@ -1,4 +1,5 @@
 use std::ffi::CString;
+use std::fs;
 use std::path::Path;
 
 /// Formata bytes em base 1000, como o Finder ("1,5 GB").
@@ -24,6 +25,18 @@ pub fn display_path(path: &Path) -> String {
     }
 }
 
+/// O caminho **real** de `dir` (com links simbólicos resolvidos) fica dentro de `home`,
+/// pelo menos um nível abaixo dela? É a checagem que a trava de segurança usa: o texto do
+/// caminho pode parecer seguro (`~/Library/Caches`) e ser um link para fora da sua pasta.
+pub fn real_dir_inside_home(dir: &Path, home: &Path) -> bool {
+    let (Ok(real_dir), Ok(real_home)) = (fs::canonicalize(dir), fs::canonicalize(home)) else {
+        return false;
+    };
+    real_dir
+        .strip_prefix(&real_home)
+        .is_ok_and(|rest| rest.components().count() >= 1)
+}
+
 /// (total, disponível) em bytes do volume que contém `path`.
 pub fn disk_space(path: &str) -> Option<(u64, u64)> {
     let c_path = CString::new(path).ok()?;
@@ -45,6 +58,37 @@ mod tests {
         assert_eq!(format_bytes(999), "999 B");
         assert_eq!(format_bytes(1_500), "1,5 KB");
         assert_eq!(format_bytes(2_340_000_000), "2,3 GB");
+    }
+
+    #[test]
+    fn real_dir_inside_home_resolves_symlinks() {
+        let home = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        fs::create_dir_all(home.path().join("Library/Caches")).unwrap();
+        fs::create_dir_all(home.path().join("real")).unwrap();
+        std::os::unix::fs::symlink(outside.path(), home.path().join("Library/Fora")).unwrap();
+        std::os::unix::fs::symlink(home.path().join("real"), home.path().join("Library/Dentro"))
+            .unwrap();
+
+        assert!(real_dir_inside_home(
+            &home.path().join("Library/Caches"),
+            home.path()
+        ));
+        // Link que continua dentro da home é aceito; para fora, não.
+        assert!(real_dir_inside_home(
+            &home.path().join("Library/Dentro"),
+            home.path()
+        ));
+        assert!(!real_dir_inside_home(
+            &home.path().join("Library/Fora"),
+            home.path()
+        ));
+        // A própria home, ou algo que não existe, nunca vale.
+        assert!(!real_dir_inside_home(home.path(), home.path()));
+        assert!(!real_dir_inside_home(
+            &home.path().join("nao/existe"),
+            home.path()
+        ));
     }
 
     #[test]

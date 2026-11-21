@@ -1,0 +1,9 @@
+# Ambiente Linux para rodar os testes igual ao CI: `make test-linux`.
+# Inclui smartmontools para o `diag` exercitar o caminho do smartctl.
+FROM rust:1-slim-bookworm
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends smartmontools \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src

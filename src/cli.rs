@@ -29,8 +29,9 @@ use clap_complete::Shell;
 use serde::Serialize;
 
 use crate::categories::{self, Category, Risk, Target};
-use crate::cleaner::{self, CleanReport, Mode};
+use crate::cleaner::{self, CleanReport, FailureKind, Mode};
 use crate::diag::{self, DiskKind, Severity, SmartStatus};
+use crate::lock;
 use crate::plan;
 use crate::scanner::{self, Entry, ScanResult};
 use crate::util::{disk_space, display_path, format_bytes};
@@ -135,7 +136,12 @@ struct ScanArgs {
 
 impl Default for ScanArgs {
     fn default() -> Self {
-        Self { only: vec![], details: false, top: DEFAULT_TOP, json: false }
+        Self {
+            only: vec![],
+            details: false,
+            top: DEFAULT_TOP,
+            json: false,
+        }
     }
 }
 
@@ -320,7 +326,11 @@ fn table(ui: &Ui, heads: &[&str], rows: &[Vec<Cell>]) -> String {
     let line = |cells: Vec<(String, Option<Tone>)>| {
         let mut out = String::new();
         for (i, (text, t)) in cells.into_iter().enumerate() {
-            let pad = if i == last { 0 } else { widths[i].saturating_sub(text.chars().count()) };
+            let pad = if i == last {
+                0
+            } else {
+                widths[i].saturating_sub(text.chars().count())
+            };
             let shown = match t {
                 Some(t) => ui.paint(t, &text),
                 None => text,
@@ -334,7 +344,12 @@ fn table(ui: &Ui, heads: &[&str], rows: &[Vec<Cell>]) -> String {
         out
     };
 
-    let mut out = line(heads.iter().map(|h| (h.to_string(), Some(Tone::Bold))).collect());
+    let mut out = line(
+        heads
+            .iter()
+            .map(|h| (h.to_string(), Some(Tone::Bold)))
+            .collect(),
+    );
     for row in rows {
         out.push_str(&line(row.clone()));
     }
@@ -452,15 +467,23 @@ fn expand_path(raw: &str) -> PathBuf {
     if path.is_absolute() {
         path
     } else {
-        std::env::current_dir().map(|d| d.join(&path)).unwrap_or(path)
+        std::env::current_dir()
+            .map(|d| d.join(&path))
+            .unwrap_or(path)
     }
 }
 
 /// Varre as categorias em paralelo, como a janela faz.
 fn scan_parallel(cats: &[&Category]) -> Vec<ScanResult> {
     thread::scope(|s| {
-        let handles: Vec<_> = cats.iter().map(|c| s.spawn(move || scanner::scan(c))).collect();
-        handles.into_iter().map(|h| h.join().unwrap_or_default()).collect()
+        let handles: Vec<_> = cats
+            .iter()
+            .map(|c| s.spawn(move || scanner::scan(c)))
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| h.join().unwrap_or_default())
+            .collect()
     })
 }
 
@@ -531,7 +554,9 @@ fn cmd_list(ui: &Ui, a: &JsonArgs) -> Res {
 
 fn cmd_disk(_ui: &Ui, a: &JsonArgs) -> Res {
     let Some(d) = disk_json() else {
-        return Err(CliError::Failed("não foi possível ler o uso do disco".into()));
+        return Err(CliError::Failed(
+            "não foi possível ler o uso do disco".into(),
+        ));
     };
     if a.json {
         emit_json(&d);
@@ -571,7 +596,11 @@ fn smart_cell(s: SmartStatus) -> Cell {
 fn cmd_diag(ui: &Ui, a: &JsonArgs) -> Res {
     ui.info("Diagnosticando discos…");
     let report = diag::collect();
-    let code = if report.worst() == Some(Severity::Critical) { EXIT_FAILED } else { 0 };
+    let code = if report.worst() == Some(Severity::Critical) {
+        EXIT_FAILED
+    } else {
+        0
+    };
     if a.json {
         emit_json(&report);
         return Ok(code);
@@ -583,7 +612,11 @@ fn cmd_diag(ui: &Ui, a: &JsonArgs) -> Res {
         "linux" => "Linux",
         other => other,
     };
-    let _ = writeln!(out, "{}\n", ui.paint(Tone::Bold, &format!("Diagnóstico de discos — {os}")));
+    let _ = writeln!(
+        out,
+        "{}\n",
+        ui.paint(Tone::Bold, &format!("Diagnóstico de discos — {os}"))
+    );
 
     if !report.disks.is_empty() {
         let rows: Vec<Vec<Cell>> = report
@@ -613,7 +646,19 @@ fn cmd_diag(ui: &Ui, a: &JsonArgs) -> Res {
             })
             .collect();
         out.push_str(&ui.paint(Tone::Bold, "Discos físicos\n"));
-        out.push_str(&table(ui, &["DISCO", "MODELO", "TAMANHO", "TIPO", "LOCAL", "PROTOCOLO", "SMART"], &rows));
+        out.push_str(&table(
+            ui,
+            &[
+                "DISCO",
+                "MODELO",
+                "TAMANHO",
+                "TIPO",
+                "LOCAL",
+                "PROTOCOLO",
+                "SMART",
+            ],
+            &rows,
+        ));
         out.push('\n');
     }
 
@@ -636,25 +681,55 @@ fn cmd_diag(ui: &Ui, a: &JsonArgs) -> Res {
                     cell(format_bytes(v.total_bytes)),
                     cell(format_bytes(v.free_bytes)),
                     (format!("{pct:.0}%"), pct_tone),
-                    cell(v.inodes_used_percent().map_or("—".into(), |p| format!("{p:.0}%"))),
-                    cell(if v.read_only { "somente leitura" } else { "leitura e escrita" }),
+                    cell(
+                        v.inodes_used_percent()
+                            .map_or("—".into(), |p| format!("{p:.0}%")),
+                    ),
+                    cell(if v.read_only {
+                        "somente leitura"
+                    } else {
+                        "leitura e escrita"
+                    }),
                     cell(&v.device),
                 ]
             })
             .collect();
         out.push_str(&ui.paint(Tone::Bold, "Volumes\n"));
-        out.push_str(&table(ui, &["MONTAGEM", "FS", "TOTAL", "LIVRE", "USO", "INODES", "MODO", "DISPOSITIVO"], &rows));
+        out.push_str(&table(
+            ui,
+            &[
+                "MONTAGEM",
+                "FS",
+                "TOTAL",
+                "LIVRE",
+                "USO",
+                "INODES",
+                "MODO",
+                "DISPOSITIVO",
+            ],
+            &rows,
+        ));
         out.push('\n');
     }
 
     out.push_str(&ui.paint(Tone::Bold, "Achados\n"));
     if report.findings.is_empty() {
-        let _ = writeln!(out, "{}", ui.paint(Tone::Green, "Nenhum problema encontrado."));
+        let _ = writeln!(
+            out,
+            "{}",
+            ui.paint(Tone::Green, "Nenhum problema encontrado.")
+        );
     } else {
         let rows: Vec<Vec<Cell>> = report
             .findings
             .iter()
-            .map(|f| vec![tone(severity_label(f.severity), severity_tone(f.severity)), cell(&f.subject), cell(&f.message)])
+            .map(|f| {
+                vec![
+                    tone(severity_label(f.severity), severity_tone(f.severity)),
+                    cell(&f.subject),
+                    cell(&f.message),
+                ]
+            })
             .collect();
         out.push_str(&table(ui, &["NÍVEL", "ONDE", "O QUE"], &rows));
     }
@@ -699,7 +774,10 @@ struct ScanJson {
 }
 
 fn entry_json(e: &Entry) -> EntryJson {
-    EntryJson { path: e.path.display().to_string(), bytes: e.size }
+    EntryJson {
+        path: e.path.display().to_string(),
+        bytes: e.size,
+    }
 }
 
 fn cmd_scan(ui: &Ui, a: &ScanArgs) -> Res {
@@ -735,7 +813,11 @@ fn cmd_scan(ui: &Ui, a: &ScanArgs) -> Res {
                     .then(|| s.entries.iter().take(a.top).map(entry_json).collect()),
             })
             .collect();
-        emit_json(&ScanJson { disk, categories, total_bytes: total });
+        emit_json(&ScanJson {
+            disk,
+            categories,
+            total_bytes: total,
+        });
         return Ok(0);
     }
 
@@ -748,17 +830,32 @@ fn cmd_scan(ui: &Ui, a: &ScanArgs) -> Res {
         .zip(&scans)
         .map(|(c, s)| {
             let size = size_text(s);
-            let size = if s.unavailable { tone(size, Tone::Amber) } else { cell(size) };
+            let size = if s.unavailable {
+                tone(size, Tone::Amber)
+            } else {
+                cell(size)
+            };
             vec![cell(c.id), risk_cell(c.risk), size, cell(c.name)]
         })
         .collect();
     out.push_str(&table(ui, &["ID", "RISCO", "TAMANHO", "CATEGORIA"], &rows));
-    let _ = writeln!(out, "\n{}", ui.paint(Tone::Bold, &format!("Total em arquivos  {}", format_bytes(total))));
+    let _ = writeln!(
+        out,
+        "\n{}",
+        ui.paint(
+            Tone::Bold,
+            &format!("Total em arquivos  {}", format_bytes(total))
+        )
+    );
 
     // Avisos que a janela mostra no cartão (ex.: falta de Acesso Total ao Disco).
     for (c, s) in picked.iter().zip(&scans) {
         if let (Some(note), Target::DirContents { .. }) = (&s.note, &c.target) {
-            let _ = writeln!(out, "{}", ui.paint(Tone::Amber, &format!("! {}: {note}", c.name)));
+            let _ = writeln!(
+                out,
+                "{}",
+                ui.paint(Tone::Amber, &format!("! {}: {note}", c.name))
+            );
         }
     }
 
@@ -770,17 +867,36 @@ fn cmd_scan(ui: &Ui, a: &ScanArgs) -> Res {
             let _ = writeln!(
                 out,
                 "\n{}",
-                ui.paint(Tone::Bold, &format!("{} ({}) — {} itens", c.name, c.id, s.entries.len()))
+                ui.paint(
+                    Tone::Bold,
+                    &format!("{} ({}) — {} itens", c.name, c.id, s.entries.len())
+                )
             );
             for e in s.entries.iter().take(a.top) {
-                let _ = writeln!(out, "  {:>10}  {}", format_bytes(e.size), display_path(&e.path));
+                let _ = writeln!(
+                    out,
+                    "  {:>10}  {}",
+                    format_bytes(e.size),
+                    display_path(&e.path)
+                );
             }
             let hidden = s.entries.len().saturating_sub(a.top);
             if hidden > 0 {
-                let _ = writeln!(out, "{}", ui.paint(Tone::Dim, &format!("  … e mais {hidden} itens menores")));
+                let _ = writeln!(
+                    out,
+                    "{}",
+                    ui.paint(Tone::Dim, &format!("  … e mais {hidden} itens menores"))
+                );
             }
         }
-        let _ = writeln!(out, "\n{}", ui.paint(Tone::Dim, "Para abrir um item no Finder: epma-system-data reveal CAMINHO"));
+        let _ = writeln!(
+            out,
+            "\n{}",
+            ui.paint(
+                Tone::Dim,
+                "Para abrir um item no Finder: epma-system-data reveal CAMINHO"
+            )
+        );
     }
     emit(&out);
     Ok(0)
@@ -796,7 +912,9 @@ fn cmd_reveal(raw: &str) -> Res {
     match Proc::new("open").arg("-R").arg(&path).status() {
         Ok(s) if s.success() => Ok(0),
         Ok(s) => Err(CliError::Failed(format!("`open -R` saiu com {s}"))),
-        Err(e) => Err(CliError::Failed(format!("não foi possível rodar `open`: {e}"))),
+        Err(e) => Err(CliError::Failed(format!(
+            "não foi possível rodar `open`: {e}"
+        ))),
     }
 }
 
@@ -829,6 +947,7 @@ struct PlannedJson {
 #[derive(Serialize)]
 struct FailureJson {
     path: String,
+    kind: FailureKind,
     error: String,
 }
 
@@ -868,7 +987,11 @@ fn planned_json(j: &Job) -> PlannedJson {
         name: j.cat.name,
         risk: risk_id(j.cat.risk),
         kind: kind_id(j.cat),
-        items: if is_dir { j.entries.len() } else { j.scan.items.unwrap_or(0) },
+        items: if is_dir {
+            j.entries.len()
+        } else {
+            j.scan.items.unwrap_or(0)
+        },
         bytes: is_dir.then(|| j.bytes()),
         command: command_line(&j.cat.target),
     }
@@ -876,18 +999,25 @@ fn planned_json(j: &Job) -> PlannedJson {
 
 fn why_not(scan: &ScanResult) -> String {
     if scan.unavailable {
-        scan.note.clone().unwrap_or_else(|| "indisponível".into())
-    } else {
-        "nada para limpar".into()
+        return scan.note.clone().unwrap_or_else(|| "indisponível".into());
+    }
+    // Aviso da medição (link para fora da home, falta de permissão) explica por que não há nada.
+    match scan.note.as_deref().filter(|_| scan.items.is_none()) {
+        Some(note) => format!("nada para limpar. {note}"),
+        None => "nada para limpar".into(),
     }
 }
 
 fn plan_text(ui: &Ui, mode: Mode, jobs: &[Job], not_cleaned: &[(&Category, String)]) -> String {
     let mut out = String::new();
-    let _ = writeln!(out, "Plano de limpeza — modo: {}\n", match mode {
-        Mode::Trash => "Lixeira",
-        Mode::Permanent => "exclusão permanente",
-    });
+    let _ = writeln!(
+        out,
+        "Plano de limpeza — modo: {}\n",
+        match mode {
+            Mode::Trash => "Lixeira",
+            Mode::Permanent => "exclusão permanente",
+        }
+    );
 
     let rows: Vec<Vec<Cell>> = jobs
         .iter()
@@ -908,28 +1038,58 @@ fn plan_text(ui: &Ui, mode: Mode, jobs: &[Job], not_cleaned: &[(&Category, Strin
             ],
         })
         .collect();
-    out.push_str(&table(ui, &["ID", "RISCO", "ITENS", "TAMANHO", "CATEGORIA"], &rows));
+    out.push_str(&table(
+        ui,
+        &["ID", "RISCO", "ITENS", "TAMANHO", "CATEGORIA"],
+        &rows,
+    ));
 
     for j in jobs {
         if let Some(cmd) = command_line(&j.cat.target) {
-            let _ = writeln!(out, "{}", ui.paint(Tone::Dim, &format!("  {} executa: {cmd}", j.cat.id)));
+            let _ = writeln!(
+                out,
+                "{}",
+                ui.paint(Tone::Dim, &format!("  {} executa: {cmd}", j.cat.id))
+            );
         }
     }
     for (cat, reason) in not_cleaned {
-        let _ = writeln!(out, "{}", ui.paint(Tone::Dim, &format!("  {} fora do plano: {reason}", cat.id)));
+        let _ = writeln!(
+            out,
+            "{}",
+            ui.paint(Tone::Dim, &format!("  {} fora do plano: {reason}", cat.id))
+        );
     }
 
     let bytes: u64 = jobs.iter().map(Job::bytes).sum();
-    let _ = writeln!(out, "\n{} categoria(s), {} em arquivos.", jobs.len(), format_bytes(bytes));
+    let _ = writeln!(
+        out,
+        "\n{} categoria(s), {} em arquivos.",
+        jobs.len(),
+        format_bytes(bytes)
+    );
     let _ = match mode {
-        Mode::Trash => writeln!(out, "Os itens vão para a Lixeira. O espaço só é liberado quando você esvaziá-la."),
+        Mode::Trash => writeln!(
+            out,
+            "Os itens vão para a Lixeira. O espaço só é liberado quando você esvaziá-la."
+        ),
         Mode::Permanent => writeln!(
             out,
             "{}",
-            ui.paint(Tone::Red, "Os itens serão excluídos permanentemente. Não dá para desfazer.")
+            ui.paint(
+                Tone::Red,
+                "Os itens serão excluídos permanentemente. Não dá para desfazer."
+            )
         ),
     };
-    let _ = writeln!(out, "{}", ui.paint(Tone::Dim, "Feche os apps abertos antes de limpar os caches."));
+    let _ = writeln!(
+        out,
+        "{}",
+        ui.paint(
+            Tone::Dim,
+            "Feche os apps abertos antes de limpar os caches."
+        )
+    );
     out
 }
 
@@ -959,7 +1119,11 @@ fn result_json(cat: &Category, r: &CleanReport) -> ResultJson {
         failures: r
             .failures
             .iter()
-            .map(|(p, e)| FailureJson { path: p.display().to_string(), error: e.clone() })
+            .map(|f| FailureJson {
+                path: f.path.display().to_string(),
+                kind: f.kind,
+                error: f.message.clone(),
+            })
             .collect(),
         output: r.output.clone().filter(|o| !o.is_empty()),
     }
@@ -971,7 +1135,11 @@ fn cmd_clean(ui: &Ui, a: &CleanArgs) -> Res {
     if selected.is_empty() {
         return Err(CliError::Usage("nenhuma categoria selecionada".into()));
     }
-    let mode = if a.permanent { Mode::Permanent } else { Mode::Trash };
+    let mode = if a.permanent {
+        Mode::Permanent
+    } else {
+        Mode::Trash
+    };
     let disk_before = disk_json();
 
     // 1. Medir (a limpeza só age sobre o que acabou de ser medido).
@@ -986,7 +1154,10 @@ fn cmd_clean(ui: &Ui, a: &CleanArgs) -> Res {
         .flat_map(|s| s.entries.iter().map(|e| e.path.as_path()))
         .collect();
     for p in skip.iter().filter(|p| !known.contains(p.as_path())) {
-        ui.info(&format!("aviso: --skip {} não corresponde a nenhum item medido", display_path(p)));
+        ui.info(&format!(
+            "aviso: --skip {} não corresponde a nenhum item medido",
+            display_path(p)
+        ));
     }
 
     // 3. Montar o plano.
@@ -1006,7 +1177,10 @@ fn cmd_clean(ui: &Ui, a: &CleanArgs) -> Res {
     let not_cleaned_json = || {
         not_cleaned
             .iter()
-            .map(|(c, r)| SkippedJson { id: c.id, reason: r.clone() })
+            .map(|(c, r)| SkippedJson {
+                id: c.id,
+                reason: r.clone(),
+            })
             .collect::<Vec<_>>()
     };
     let finish_json = |results: Vec<ResultJson>, disk_after| {
@@ -1042,7 +1216,10 @@ fn cmd_clean(ui: &Ui, a: &CleanArgs) -> Res {
         if a.json {
             finish_json(vec![], disk_json());
         } else {
-            emit(&format!("\n{}\n", ui.paint(Tone::Bold, "Ensaio: nada foi alterado.")));
+            emit(&format!(
+                "\n{}\n",
+                ui.paint(Tone::Bold, "Ensaio: nada foi alterado.")
+            ));
         }
         return Ok(0);
     }
@@ -1060,7 +1237,9 @@ fn cmd_clean(ui: &Ui, a: &CleanArgs) -> Res {
         }
     }
 
-    // 6. Limpar, uma categoria por vez, como a janela.
+    // 6. Limpar, uma categoria por vez, como a janela. Só uma limpeza por vez no usuário:
+    // a trava vale até o fim da função (inclui o resumo).
+    let _lock = lock::acquire().map_err(|e| CliError::Failed(e.to_string()))?;
     if !a.json {
         emit("\n");
     }
@@ -1101,11 +1280,21 @@ fn cmd_clean(ui: &Ui, a: &CleanArgs) -> Res {
         finish_json(results, disk_after);
     } else {
         let mut out = String::new();
-        let what = if mode == Mode::Trash { "na Lixeira" } else { "liberados" };
+        let what = if mode == Mode::Trash {
+            "na Lixeira"
+        } else {
+            "liberados"
+        };
         let _ = writeln!(
             out,
             "\n{}",
-            ui.paint(Tone::Bold, &format!("Resumo: {removed} itens, {} {what}, {failures} falha(s).", format_bytes(freed)))
+            ui.paint(
+                Tone::Bold,
+                &format!(
+                    "Resumo: {removed} itens, {} {what}, {failures} falha(s).",
+                    format_bytes(freed)
+                )
+            )
         );
         if let Some(d) = &disk_after {
             let _ = writeln!(out, "{}", disk_line(d));
@@ -1121,7 +1310,11 @@ fn cmd_clean(ui: &Ui, a: &CleanArgs) -> Res {
 fn plan_text_empty(ui: &Ui, not_cleaned: &[(&Category, String)]) -> String {
     let mut out = String::from("Nada para limpar.\n");
     for (cat, reason) in not_cleaned {
-        let _ = writeln!(out, "{}", ui.paint(Tone::Dim, &format!("  {}: {reason}", cat.id)));
+        let _ = writeln!(
+            out,
+            "{}",
+            ui.paint(Tone::Dim, &format!("  {}: {reason}", cat.id))
+        );
     }
     out
 }
@@ -1192,7 +1385,10 @@ mod tests {
 
     #[test]
     fn table_aligns_columns_without_trailing_padding() {
-        let ui = Ui { color: false, quiet: true };
+        let ui = Ui {
+            color: false,
+            quiet: true,
+        };
         let rows = vec![vec![cell("a"), cell("xx")], vec![cell("bbb"), cell("y")]];
         let out = table(&ui, &["ID", "NOME"], &rows);
         let lines: Vec<&str> = out.lines().collect();

@@ -129,7 +129,13 @@ pub struct Report {
 
 impl Report {
     fn new(os: &'static str) -> Self {
-        Self { os, disks: vec![], volumes: vec![], findings: vec![], notes: vec![] }
+        Self {
+            os,
+            disks: vec![],
+            volumes: vec![],
+            findings: vec![],
+            notes: vec![],
+        }
     }
 
     pub fn worst(&self) -> Option<Severity> {
@@ -146,7 +152,8 @@ pub fn collect() -> Report {
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     let mut report = {
         let mut r = Report::new("outro");
-        r.notes.push("diagnóstico de discos só existe para macOS e Linux".into());
+        r.notes
+            .push("diagnóstico de discos só existe para macOS e Linux".into());
         r
     };
     report.findings = analyze(&report);
@@ -192,7 +199,9 @@ pub fn analyze(report: &Report) -> Vec<Finding> {
             out.push(Finding {
                 severity: Severity::Critical,
                 subject: v.mount.clone(),
-                message: format!("{pct:.0}% cheio: o sistema pode falhar ao gravar. Libere espaço agora."),
+                message: format!(
+                    "{pct:.0}% cheio: o sistema pode falhar ao gravar. Libere espaço agora."
+                ),
             });
         } else if pct >= FULL_WARNING {
             out.push(Finding {
@@ -224,7 +233,8 @@ pub fn analyze(report: &Report) -> Vec<Finding> {
             SmartStatus::Failing => out.push(Finding {
                 severity: Severity::Critical,
                 subject: d.name.clone(),
-                message: "o SMART reporta falha: faça backup agora e planeje trocar o disco.".into(),
+                message: "o SMART reporta falha: faça backup agora e planeje trocar o disco."
+                    .into(),
             }),
             SmartStatus::Unknown => {
                 if let Some(note) = &d.smart_note {
@@ -266,7 +276,9 @@ pub fn parse_diskutil_list(text: &str) -> Vec<String> {
 pub fn parse_diskutil_info(name: &str, text: &str) -> Disk {
     let mut disk = Disk::new(name);
     for line in text.lines() {
-        let Some((key, value)) = line.split_once(':') else { continue };
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
         let (key, value) = (key.trim(), value.trim());
         match key {
             "Device / Media Name" if !value.is_empty() => disk.model = Some(value.to_string()),
@@ -320,8 +332,14 @@ fn unescape_mount(s: &str) -> String {
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'\\' && i + 4 <= bytes.len() && bytes[i + 1..i + 4].iter().all(|b| (b'0'..=b'7').contains(b)) {
-            let value = (bytes[i + 1] - b'0') * 64 + (bytes[i + 2] - b'0') * 8 + (bytes[i + 3] - b'0');
+        if bytes[i] == b'\\'
+            && i + 4 <= bytes.len()
+            && bytes[i + 1..i + 4]
+                .iter()
+                .all(|b| (b'0'..=b'7').contains(b))
+        {
+            let value =
+                (bytes[i + 1] - b'0') * 64 + (bytes[i + 2] - b'0') * 8 + (bytes[i + 3] - b'0');
             out.push(value);
             i += 4;
         } else {
@@ -395,7 +413,10 @@ pub fn keep_macos_mount(device: &str, fstype: &str, mount: &str) -> bool {
 pub fn parse_smartctl_health(text: &str) -> (SmartStatus, Option<String>) {
     let lower = text.to_lowercase();
     if lower.contains("permission denied") {
-        return (SmartStatus::Unknown, Some("sem permissão; rode com sudo".into()));
+        return (
+            SmartStatus::Unknown,
+            Some("sem permissão; rode com sudo".into()),
+        );
     }
     // Só o veredito do disco conta como falha: "failed" solto aparece em erros de abertura
     // do dispositivo (ex.: controladora RAID) e não pode virar um alarme falso.
@@ -411,7 +432,10 @@ pub fn parse_smartctl_health(text: &str) -> (SmartStatus, Option<String>) {
     if lower.contains("smart support is: unavailable") || lower.contains("not supported") {
         return (SmartStatus::NotSupported, None);
     }
-    (SmartStatus::Unknown, Some("resposta do smartctl não reconhecida".into()))
+    (
+        SmartStatus::Unknown,
+        Some("resposta do smartctl não reconhecida".into()),
+    )
 }
 
 // ----------------------------------------------------------- sysfs
@@ -419,10 +443,17 @@ pub fn parse_smartctl_health(text: &str) -> (SmartStatus, Option<String>) {
 /// Lê os discos de `/sys/block` (ou de uma cópia dela, nos testes).
 pub fn read_sysfs_disks(root: &Path) -> Vec<Disk> {
     const LOGICAL: [&str; 8] = ["loop", "ram", "zram", "dm-", "nbd", "sr", "fd", "md"];
-    let read = |p: std::path::PathBuf| std::fs::read_to_string(p).ok().map(|s| s.trim().to_string());
+    let read = |p: std::path::PathBuf| {
+        std::fs::read_to_string(p)
+            .ok()
+            .map(|s| s.trim().to_string())
+    };
 
     let mut names: Vec<String> = match std::fs::read_dir(root) {
-        Ok(rd) => rd.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect(),
+        Ok(rd) => rd
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect(),
         Err(_) => return vec![],
     };
     names.sort();
@@ -433,7 +464,9 @@ pub fn read_sysfs_disks(root: &Path) -> Vec<Disk> {
         .map(|name| {
             let dir = root.join(name);
             let mut d = Disk::new(name);
-            d.size_bytes = read(dir.join("size")).and_then(|s| s.parse::<u64>().ok()).map(|s| s * 512);
+            d.size_bytes = read(dir.join("size"))
+                .and_then(|s| s.parse::<u64>().ok())
+                .map(|s| s * 512);
             d.model = read(dir.join("device/model")).filter(|m| !m.is_empty());
             d.kind = match read(dir.join("queue/rotational")).as_deref() {
                 Some("1") => DiskKind::Hdd,
@@ -454,7 +487,10 @@ pub fn read_sysfs_disks(root: &Path) -> Vec<Disk> {
             };
             // Disco virtual: o hipervisor costuma declarar "rotacional" sem ser verdade, e
             // não há SMART para ler.
-            if d.protocol.as_deref().is_some_and(|p| p == "VirtIO" || p == "Xen") {
+            if d.protocol
+                .as_deref()
+                .is_some_and(|p| p == "VirtIO" || p == "Xen")
+            {
                 d.kind = DiskKind::Unknown;
                 d.smart = SmartStatus::NotSupported;
             }
@@ -472,7 +508,11 @@ pub fn statvfs_volume(device: &str, mount: &str, fstype: &str, read_only: bool) 
     if unsafe { libc::statvfs(c_path.as_ptr(), &mut s) } != 0 {
         return None;
     }
-    let block = if s.f_frsize > 0 { s.f_frsize as u64 } else { s.f_bsize as u64 };
+    let block = if s.f_frsize > 0 {
+        s.f_frsize as u64
+    } else {
+        s.f_bsize as u64
+    };
     let total = s.f_blocks as u64 * block;
     let free_all = s.f_bfree as u64 * block;
     Some(Volume {
@@ -499,7 +539,9 @@ mod macos {
     fn run(program: &str, args: &[&str]) -> Result<String, String> {
         match Command::new(program).args(args).output() {
             Ok(out) => Ok(String::from_utf8_lossy(&out.stdout).into_owned()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(format!("`{program}` não encontrado")),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                Err(format!("`{program}` não encontrado"))
+            }
             Err(e) => Err(format!("`{program}`: {e}")),
         }
     }
@@ -517,13 +559,17 @@ mod macos {
                     }
                 }
             }
-            Err(e) => report.notes.push(format!("lista de discos indisponível: {e}")),
+            Err(e) => report
+                .notes
+                .push(format!("lista de discos indisponível: {e}")),
         }
         report
     }
 
     fn cstr(raw: &[libc::c_char]) -> String {
-        unsafe { CStr::from_ptr(raw.as_ptr()) }.to_string_lossy().into_owned()
+        unsafe { CStr::from_ptr(raw.as_ptr()) }
+            .to_string_lossy()
+            .into_owned()
     }
 
     fn volumes() -> Vec<Volume> {
@@ -536,8 +582,11 @@ mod macos {
         let list = unsafe { std::slice::from_raw_parts(ptr, n as usize) };
         list.iter()
             .filter_map(|s| {
-                let (device, mount, fstype) =
-                    (cstr(&s.f_mntfromname), cstr(&s.f_mntonname), cstr(&s.f_fstypename));
+                let (device, mount, fstype) = (
+                    cstr(&s.f_mntfromname),
+                    cstr(&s.f_mntonname),
+                    cstr(&s.f_fstypename),
+                );
                 if !keep_macos_mount(&device, &fstype, &mount) {
                     return None;
                 }
@@ -570,14 +619,19 @@ mod linux {
         report.volumes = volumes(&std::fs::read_to_string("/proc/self/mounts").unwrap_or_default());
         report.disks = read_sysfs_disks(Path::new("/sys/block"));
         if report.disks.is_empty() {
-            report.notes.push("nenhum disco encontrado em /sys/block (contêiner?)".into());
+            report
+                .notes
+                .push("nenhum disco encontrado em /sys/block (contêiner?)".into());
         }
         read_smart(&mut report);
         report
     }
 
     fn volumes(mounts: &str) -> Vec<Volume> {
-        let wanted: Vec<MountEntry> = parse_proc_mounts(mounts).into_iter().filter(keep_linux_mount).collect();
+        let wanted: Vec<MountEntry> = parse_proc_mounts(mounts)
+            .into_iter()
+            .filter(keep_linux_mount)
+            .collect();
         pick_mounts(wanted)
             .into_iter()
             .filter_map(|m| statvfs_volume(&m.device, &m.mount, &m.fstype, m.read_only))
@@ -589,10 +643,18 @@ mod linux {
             return;
         }
         let is_root = unsafe { libc::geteuid() } == 0;
-        for disk in report.disks.iter_mut().filter(|d| d.smart != SmartStatus::NotSupported) {
-            match Command::new("smartctl").args(["-H", &format!("/dev/{}", disk.name)]).output() {
+        for disk in report
+            .disks
+            .iter_mut()
+            .filter(|d| d.smart != SmartStatus::NotSupported)
+        {
+            match Command::new("smartctl")
+                .args(["-H", &format!("/dev/{}", disk.name)])
+                .output()
+            {
                 Ok(out) => {
-                    let (status, note) = parse_smartctl_health(&String::from_utf8_lossy(&out.stdout));
+                    let (status, note) =
+                        parse_smartctl_health(&String::from_utf8_lossy(&out.stdout));
                     disk.smart = status;
                     disk.smart_note = note;
                 }
@@ -608,7 +670,9 @@ mod linux {
             }
         }
         if !is_root && report.disks.iter().any(|d| d.smart == SmartStatus::Unknown) {
-            report.notes.push("para ler o SMART no Linux rode com sudo".into());
+            report
+                .notes
+                .push("para ler o SMART no Linux rode com sudo".into());
         }
     }
 }
@@ -658,7 +722,13 @@ mod tests {
     }
 
     fn report(os: &'static str, volumes: Vec<Volume>, disks: Vec<Disk>) -> Report {
-        Report { os, disks, volumes, findings: vec![], notes: vec![] }
+        Report {
+            os,
+            disks,
+            volumes,
+            findings: vec![],
+            notes: vec![],
+        }
     }
 
     #[test]
@@ -703,14 +773,29 @@ proc /proc proc rw 0 0
 
     #[test]
     fn pick_mounts_prefers_shortest_mount_per_device() {
-        let m = |d: &str, p: &str| MountEntry { device: d.into(), mount: p.into(), fstype: "ext4".into(), read_only: false };
-        let picked = pick_mounts(vec![m("/dev/a", "/etc/hosts"), m("/dev/b", "/data"), m("/dev/a", "/"), m("/dev/a", "/etc/resolv.conf")]);
+        let m = |d: &str, p: &str| MountEntry {
+            device: d.into(),
+            mount: p.into(),
+            fstype: "ext4".into(),
+            read_only: false,
+        };
+        let picked = pick_mounts(vec![
+            m("/dev/a", "/etc/hosts"),
+            m("/dev/b", "/data"),
+            m("/dev/a", "/"),
+            m("/dev/a", "/etc/resolv.conf"),
+        ]);
         assert_eq!(picked, [m("/dev/a", "/"), m("/dev/b", "/data")]);
     }
 
     #[test]
     fn linux_mount_filter_drops_snaps_and_loops_but_keeps_network() {
-        let e = |d: &str, f: &str| MountEntry { device: d.into(), mount: "/m".into(), fstype: f.into(), read_only: false };
+        let e = |d: &str, f: &str| MountEntry {
+            device: d.into(),
+            mount: "/m".into(),
+            fstype: f.into(),
+            read_only: false,
+        };
         assert!(!keep_linux_mount(&e("/dev/loop3", "squashfs")));
         assert!(!keep_linux_mount(&e("tmpfs", "tmpfs")));
         assert!(!keep_linux_mount(&e("overlay", "overlay")));
@@ -721,11 +806,31 @@ proc /proc proc rw 0 0
     #[test]
     fn macos_mount_filter_hides_technical_volumes() {
         assert!(keep_macos_mount("/dev/disk3s1s1", "apfs", "/"));
-        assert!(keep_macos_mount("/dev/disk3s5", "apfs", "/System/Volumes/Data"));
-        assert!(!keep_macos_mount("/dev/disk3s6", "apfs", "/System/Volumes/VM"));
-        assert!(!keep_macos_mount("/dev/disk4s2", "hfs", "/private/var/folders/z2/abc/T/com.docker.install/Docker"));
-        assert!(!keep_macos_mount("map auto_home", "autofs", "/System/Volumes/Data/home"));
-        assert!(!keep_macos_mount("/dev/disk5s1", "apfs", "/Library/Developer/CoreSimulator/Volumes/iOS_1"));
+        assert!(keep_macos_mount(
+            "/dev/disk3s5",
+            "apfs",
+            "/System/Volumes/Data"
+        ));
+        assert!(!keep_macos_mount(
+            "/dev/disk3s6",
+            "apfs",
+            "/System/Volumes/VM"
+        ));
+        assert!(!keep_macos_mount(
+            "/dev/disk4s2",
+            "hfs",
+            "/private/var/folders/z2/abc/T/com.docker.install/Docker"
+        ));
+        assert!(!keep_macos_mount(
+            "map auto_home",
+            "autofs",
+            "/System/Volumes/Data/home"
+        ));
+        assert!(!keep_macos_mount(
+            "/dev/disk5s1",
+            "apfs",
+            "/Library/Developer/CoreSimulator/Volumes/iOS_1"
+        ));
         assert!(keep_macos_mount("//u@srv/share", "smbfs", "/Volumes/share"));
     }
 
@@ -762,8 +867,24 @@ proc /proc proc rw 0 0
                 fs::write(p, content).unwrap();
             }
         };
-        mk("sda", &[("size", "1953525168\n"), ("device/model", "ST1000DM010-2EP1  \n"), ("queue/rotational", "1\n"), ("removable", "0\n")]);
-        mk("nvme0n1", &[("size", "1000215216\n"), ("device/model", "Samsung SSD 970\n"), ("queue/rotational", "0\n"), ("removable", "0\n")]);
+        mk(
+            "sda",
+            &[
+                ("size", "1953525168\n"),
+                ("device/model", "ST1000DM010-2EP1  \n"),
+                ("queue/rotational", "1\n"),
+                ("removable", "0\n"),
+            ],
+        );
+        mk(
+            "nvme0n1",
+            &[
+                ("size", "1000215216\n"),
+                ("device/model", "Samsung SSD 970\n"),
+                ("queue/rotational", "0\n"),
+                ("removable", "0\n"),
+            ],
+        );
         mk("vda", &[("size", "2048\n"), ("queue/rotational", "1\n")]);
         mk("loop0", &[("size", "100\n")]);
         mk("dm-0", &[("size", "100\n")]);
@@ -796,24 +917,52 @@ proc /proc proc rw 0 0
 
     #[test]
     fn analyze_flags_full_volumes_by_severity_and_sorts() {
-        let r = report("linux", vec![vol("/ok", "ext4", 50, 50), vol("/quase", "ext4", 91, 9), vol("/cheio", "ext4", 96, 4)], vec![]);
+        let r = report(
+            "linux",
+            vec![
+                vol("/ok", "ext4", 50, 50),
+                vol("/quase", "ext4", 91, 9),
+                vol("/cheio", "ext4", 96, 4),
+            ],
+            vec![],
+        );
         let f = analyze(&r);
         assert_eq!(f.len(), 2);
-        assert_eq!((f[0].severity, f[0].subject.as_str()), (Severity::Critical, "/cheio"));
-        assert_eq!((f[1].severity, f[1].subject.as_str()), (Severity::Warning, "/quase"));
+        assert_eq!(
+            (f[0].severity, f[0].subject.as_str()),
+            (Severity::Critical, "/cheio")
+        );
+        assert_eq!(
+            (f[1].severity, f[1].subject.as_str()),
+            (Severity::Warning, "/quase")
+        );
     }
 
     #[test]
     fn full_read_only_volume_is_not_reported() {
         // Imagem de disco ou ISO cheia é normal.
-        let full_ro = Volume { read_only: true, ..vol("/mnt/iso", "iso9660", 100, 0) };
+        let full_ro = Volume {
+            read_only: true,
+            ..vol("/mnt/iso", "iso9660", 100, 0)
+        };
         assert!(analyze(&report("linux", vec![full_ro], vec![])).is_empty());
     }
 
     #[test]
     fn apfs_volumes_of_one_container_are_reported_once() {
-        let apfs = |dev: &str, mount: &str| Volume { device: dev.into(), ..vol(mount, "apfs", 92, 8) };
-        let r = report("macos", vec![apfs("/dev/disk3s3s1", "/"), apfs("/dev/disk3s1", "/System/Volumes/Data"), apfs("/dev/disk5s1", "/Volumes/Outro")], vec![]);
+        let apfs = |dev: &str, mount: &str| Volume {
+            device: dev.into(),
+            ..vol(mount, "apfs", 92, 8)
+        };
+        let r = report(
+            "macos",
+            vec![
+                apfs("/dev/disk3s3s1", "/"),
+                apfs("/dev/disk3s1", "/System/Volumes/Data"),
+                apfs("/dev/disk5s1", "/Volumes/Outro"),
+            ],
+            vec![],
+        );
         let f = analyze(&r);
         assert_eq!(f.len(), 2, "{f:?}");
         assert_eq!(f[0].subject, "/");
@@ -833,9 +982,20 @@ proc /proc proc rw 0 0
 
     #[test]
     fn analyze_read_only_expected_vs_unexpected() {
-        let ro = |mount: &str, fstype: &str| Volume { read_only: true, ..vol(mount, fstype, 10, 90) };
+        let ro = |mount: &str, fstype: &str| Volume {
+            read_only: true,
+            ..vol(mount, fstype, 10, 90)
+        };
         // macOS: raiz selada, imagens de disco e iso são normais.
-        let mac = report("macos", vec![ro("/", "apfs"), ro("/Volumes/CD", "cd9660"), ro("/Volumes/Img", "hfs")], vec![]);
+        let mac = report(
+            "macos",
+            vec![
+                ro("/", "apfs"),
+                ro("/Volumes/CD", "cd9660"),
+                ro("/Volumes/Img", "hfs"),
+            ],
+            vec![],
+        );
         assert!(analyze(&mac).is_empty());
         // Linux: ext4 só leitura é suspeito; a mesma raiz no macOS não.
         let f = analyze(&report("linux", vec![ro("/", "ext4")], vec![]));
@@ -855,8 +1015,14 @@ proc /proc proc rw 0 0
 
         let f = analyze(&report("linux", vec![], vec![failing, unknown, silent, ok]));
         assert_eq!(f.len(), 2);
-        assert_eq!((f[0].severity, f[0].subject.as_str()), (Severity::Critical, "sda"));
-        assert_eq!((f[1].severity, f[1].subject.as_str()), (Severity::Info, "sdb"));
+        assert_eq!(
+            (f[0].severity, f[0].subject.as_str()),
+            (Severity::Critical, "sda")
+        );
+        assert_eq!(
+            (f[1].severity, f[1].subject.as_str()),
+            (Severity::Info, "sdb")
+        );
     }
 
     #[test]

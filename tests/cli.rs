@@ -9,7 +9,10 @@ use predicates::prelude::*;
 
 fn bin(home: &Path) -> Command {
     let mut cmd = Command::cargo_bin("epma-system-data").unwrap();
-    cmd.env("HOME", home).env("NO_COLOR", "1").env_remove("TERM");
+    cmd.env("HOME", home)
+        .env("NO_COLOR", "1")
+        .env_remove("TERM")
+        .env_remove("XDG_STATE_HOME");
     cmd
 }
 
@@ -122,7 +125,9 @@ fn clean_dry_run_changes_nothing() {
         .args(["clean", "--only", "user_caches", "--dry-run", "--permanent"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Ensaio").and(predicate::str::contains("permanentemente")));
+        .stdout(
+            predicate::str::contains("Ensaio").and(predicate::str::contains("permanentemente")),
+        );
     assert!(home.path().join("Library/Caches/grande/a.bin").exists());
     assert!(home.path().join("Library/Caches/pequeno/b.bin").exists());
 }
@@ -146,7 +151,10 @@ fn clean_permanent_yes_removes_items_but_keeps_the_directory() {
         .args(["clean", "--only", "user_caches", "--permanent", "--yes"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Caches de apps: 2 itens").and(predicate::str::contains("liberados")));
+        .stdout(
+            predicate::str::contains("Caches de apps: 2 itens")
+                .and(predicate::str::contains("liberados")),
+        );
     let caches = home.path().join("Library/Caches");
     assert!(caches.exists());
     assert_eq!(fs::read_dir(&caches).unwrap().count(), 0);
@@ -159,7 +167,14 @@ fn clean_skip_preserves_the_item() {
     let home = fixture();
     let keep = home.path().join("Library/Caches/grande");
     bin(home.path())
-        .args(["clean", "--only", "user_caches", "--permanent", "--yes", "--skip"])
+        .args([
+            "clean",
+            "--only",
+            "user_caches",
+            "--permanent",
+            "--yes",
+            "--skip",
+        ])
         .arg(&keep)
         .assert()
         .success();
@@ -171,7 +186,15 @@ fn clean_skip_preserves_the_item() {
 fn clean_exclude_drops_a_category_from_the_selection() {
     let home = fixture();
     bin(home.path())
-        .args(["clean", "--only", "user_caches,user_logs", "-x", "user_logs", "--permanent", "--yes"])
+        .args([
+            "clean",
+            "--only",
+            "user_caches,user_logs",
+            "-x",
+            "user_logs",
+            "--permanent",
+            "--yes",
+        ])
         .assert()
         .success();
     assert!(home.path().join("Library/Logs/app.log").exists());
@@ -197,7 +220,14 @@ fn clean_never_follows_symlinks_out_of_the_cache() {
 fn clean_json_reports_plan_and_results() {
     let home = fixture();
     let out = bin(home.path())
-        .args(["clean", "--only", "user_caches", "--permanent", "--yes", "--json"])
+        .args([
+            "clean",
+            "--only",
+            "user_caches",
+            "--permanent",
+            "--yes",
+            "--json",
+        ])
         .output()
         .unwrap();
     assert!(out.status.success());
@@ -223,7 +253,13 @@ fn clean_with_nothing_to_do_succeeds() {
 fn include_review_conflicts_with_only() {
     let home = fixture();
     bin(home.path())
-        .args(["clean", "--only", "user_caches", "--include-review", "--dry-run"])
+        .args([
+            "clean",
+            "--only",
+            "user_caches",
+            "--include-review",
+            "--dry-run",
+        ])
         .assert()
         .code(2);
 }
@@ -265,10 +301,16 @@ fn closed_stdout_pipe_does_not_panic() {
 #[test]
 fn diag_json_is_stable_and_read_only() {
     let home = fixture();
-    let before = fs::read_dir(home.path().join("Library/Caches")).unwrap().count();
+    let before = fs::read_dir(home.path().join("Library/Caches"))
+        .unwrap()
+        .count();
     let out = bin(home.path()).args(["diag", "--json"]).output().unwrap();
     // 0 (sem achado crítico) ou 1 (há achado crítico): nunca 2 ou 3.
-    assert!(matches!(out.status.code(), Some(0) | Some(1)), "{:?}", out.status);
+    assert!(
+        matches!(out.status.code(), Some(0) | Some(1)),
+        "{:?}",
+        out.status
+    );
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert!(["macos", "linux"].contains(&v["os"].as_str().unwrap()));
     for key in ["disks", "volumes", "findings", "notes"] {
@@ -276,7 +318,12 @@ fn diag_json_is_stable_and_read_only() {
     }
     // stdout só tem o JSON; o progresso vai para o stderr.
     assert!(!String::from_utf8_lossy(&out.stdout).contains("Diagnosticando"));
-    assert_eq!(fs::read_dir(home.path().join("Library/Caches")).unwrap().count(), before);
+    assert_eq!(
+        fs::read_dir(home.path().join("Library/Caches"))
+            .unwrap()
+            .count(),
+        before
+    );
 }
 
 #[test]
@@ -286,4 +333,108 @@ fn diag_human_output_has_sections() {
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("Diagnóstico de discos"), "{text}");
     assert!(text.contains("Achados"), "{text}");
+}
+
+/// Regressão: um `~/Library/Caches` que é link para fora da home chegou a ter o conteúdo
+/// de fora apagado, contrariando a promessa de só tocar na pasta do usuário.
+#[test]
+fn clean_never_touches_a_category_dir_symlinked_outside_home() {
+    let home = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    fs::create_dir_all(outside.path().join("alvo/sub")).unwrap();
+    fs::write(outside.path().join("alvo/sub/arquivo.txt"), b"nao apagar").unwrap();
+    fs::create_dir_all(home.path().join("Library")).unwrap();
+    std::os::unix::fs::symlink(
+        outside.path().join("alvo"),
+        home.path().join("Library/Caches"),
+    )
+    .unwrap();
+
+    bin(home.path())
+        .args(["clean", "--only", "user_caches", "--permanent", "--yes"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Nada para limpar"))
+        .stdout(predicate::str::contains("link simbólico"));
+    assert!(outside.path().join("alvo/sub/arquivo.txt").exists());
+
+    // O scan avisa, em vez de medir o que está fora.
+    bin(home.path())
+        .args(["scan", "--only", "user_caches"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("link simbólico"));
+}
+
+#[test]
+fn a_second_clean_is_refused_while_the_first_holds_the_lock() {
+    let home = fixture();
+    let guard = epma_system_data::lock::acquire_at(&epma_system_data::lock::lock_path(home.path()))
+        .unwrap();
+
+    bin(home.path())
+        .args(["clean", "--only", "user_caches", "--permanent", "--yes"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("em andamento"));
+    assert!(home.path().join("Library/Caches/grande/a.bin").exists());
+
+    // Ensaio e medição não precisam da trava.
+    bin(home.path())
+        .args(["clean", "--only", "user_caches", "--dry-run"])
+        .assert()
+        .success();
+
+    drop(guard);
+    bin(home.path())
+        .args(["clean", "--only", "user_caches", "--permanent", "--yes"])
+        .assert()
+        .success();
+    assert!(!home.path().join("Library/Caches/grande").exists());
+}
+
+/// Regressão: o erro real do sistema ("Permission denied (os error 13)") não era traduzido.
+#[test]
+fn permission_failures_are_reported_in_plain_language_with_a_kind() {
+    use std::os::unix::fs::PermissionsExt;
+    // Como root (ex.: contêiner) a permissão não vale, e não há como provocar a falha.
+    if unsafe { libc::geteuid() } == 0 {
+        return;
+    }
+    let home = fixture();
+    let locked = home.path().join("Library/Caches/protegido");
+    fs::create_dir_all(locked.join("sub")).unwrap();
+    fs::write(locked.join("sub/f"), b"x").unwrap();
+    fs::set_permissions(locked.join("sub"), fs::Permissions::from_mode(0o000)).unwrap();
+
+    let out = bin(home.path())
+        .args([
+            "clean",
+            "--only",
+            "user_caches",
+            "--permanent",
+            "--yes",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    // Devolve a permissão antes de qualquer assert, para a pasta temporária poder sumir.
+    fs::set_permissions(locked.join("sub"), fs::Permissions::from_mode(0o755)).unwrap();
+
+    assert_eq!(out.status.code(), Some(1), "falha parcial deve sair com 1");
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let failure = &v["results"][0]["failures"][0];
+    assert_eq!(failure["kind"], "permission_denied");
+    assert!(failure["path"].as_str().unwrap().ends_with("protegido"));
+
+    // E no texto para humanos, sem vazar a mensagem crua.
+    fs::set_permissions(locked.join("sub"), fs::Permissions::from_mode(0o000)).unwrap();
+    let out = bin(home.path())
+        .args(["clean", "--only", "user_caches", "--permanent", "--yes"])
+        .output()
+        .unwrap();
+    fs::set_permissions(locked.join("sub"), fs::Permissions::from_mode(0o755)).unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("sem permissão"), "{text}");
+    assert!(!text.contains("os error"), "{text}");
 }

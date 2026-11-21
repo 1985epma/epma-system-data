@@ -25,6 +25,9 @@ Categorias "revisar" começam desmarcadas. Dá para expandir cada categoria e de
 - **Mover para a Lixeira** é o modo padrão; o espaço só volta ao esvaziar a Lixeira. "Excluir permanentemente" é opcional e pede confirmação.
 - Só remove caminhos **dentro da sua pasta de usuário**, pelo menos dois níveis abaixo dela (ex.: `~/Library/Caches/app`). Nunca toca `/System`, `/Library` nem precisa de `sudo`.
 - Links simbólicos são removidos como links; o destino nunca é seguido.
+- A trava confere o caminho **real**, não só o texto: se uma pasta de categoria (por exemplo `~/Library/Caches`) for um link para fora da sua pasta de usuário, ela é ignorada com um aviso e nada é apagado lá. Isso vale também para quem moveu o cache para um disco externo por link simbólico: nesse caso, limpe pelo próprio disco.
+- Só uma limpeza roda por vez no seu usuário (janela, terminal e agendamento dividem a mesma trava). A segunda recusa com "outra limpeza está em andamento" em vez de disputar os mesmos arquivos.
+- Tamanhos: arquivos com vários hard links contam uma vez só. Clones do APFS não aparecem para o sistema de arquivos e continuam somando por inteiro, então o número pode ficar acima do espaço que volta de fato.
 - Caches ligados a iCloud, Casa, Buscar e Safari ficam de fora.
 - Feche os apps antes de limpar os caches deles.
 
@@ -103,7 +106,7 @@ Limpar só os backups de iPhone/iPad, de vez:
 epma-system-data clean --only ios_backups --permanent
 ```
 
-Outras opções: `--json` (saída estável para scripts, em `list`, `scan`, `disk`, `diag` e `clean`), `--quiet`, `--no-color` (também vale `NO_COLOR`) e `epma-system-data completions zsh|bash|fish` para autocompletar. `--scan` continua funcionando como alias de `scan`.
+Outras opções: `--json` (saída estável para scripts, em `list`, `scan`, `disk`, `diag` e `clean`; no `clean`, cada falha traz `kind`: `permission_denied`, `not_found`, `outside_home` ou `other`), `--quiet`, `--no-color` (também vale `NO_COLOR`) e `epma-system-data completions zsh|bash|fish` para autocompletar. `--scan` continua funcionando como alias de `scan`.
 
 Segurança no terminal:
 
@@ -115,7 +118,7 @@ Segurança no terminal:
 | Código | Significado |
 |---|---|
 | 0 | Sucesso (inclui ensaio e "nada para limpar") |
-| 1 | Limpeza com falhas parciais (ex.: falta Acesso Total ao Disco), ou `diag` com achado crítico |
+| 1 | Limpeza com falhas parciais (ex.: falta Acesso Total ao Disco), outra limpeza em andamento, ou `diag` com achado crítico |
 | 2 | Uso incorreto (flag ou id de categoria inválido) |
 | 3 | Recusado: pediria confirmação, mas não há terminal e faltou `--yes` |
 
@@ -150,6 +153,7 @@ src/
   main.rs        entrada: janela ou CLI
   cli.rs         comandos de terminal (clap)
   diag.rs        diagnóstico de discos (macOS e Linux)
+  lock.rs        trava: uma limpeza por vez
   plan.rs        seleção e relatório compartilhados pela janela e pelo CLI
   app.rs         interface egui
   categories.rs  o que é limpo e onde
@@ -160,8 +164,30 @@ scripts/
   bundle-macos.sh
 tests/
   cli.rs         contrato do CLI (códigos de saída, dry-run, segurança)
+.github/
+  workflows/ci.yml   formatação, clippy, testes (macOS e Linux) e auditoria
+  dependabot.yml     atualizações semanais de crates e ações
+deny.toml        licenças permitidas e avisos de segurança (cargo-deny)
+Dockerfile.test  Linux para `make test-linux`
+Makefile         os mesmos comandos do CI
 ```
 
+## Desenvolvimento
+
 ```bash
-cargo test
+make check
 ```
+
+Roda o que o CI roda: `fmt-check`, `lint` (clippy sem avisos), `test` e `deny`. Cada etapa também existe separada (`make help` lista todas).
+
+| Alvo | O que faz |
+|---|---|
+| `make fmt` | Formata o código (`cargo fmt`) |
+| `make lint` | Clippy com avisos tratados como erro |
+| `make test` | Testes na máquina atual |
+| `make test-linux` | Testes em Linux dentro do Docker (precisa do Docker) |
+| `make deny` | Licenças e avisos de segurança das dependências (`cargo install cargo-deny`) |
+
+O CI (`.github/workflows/ci.yml`) roda em cada push e PR: formatação, clippy e testes em macOS (Apple Silicon e Intel) e Linux, mais a auditoria de dependências, que também roda toda segunda-feira para pegar avisos novos sem precisar de commit. As ações do GitHub estão fixadas por SHA e o Dependabot propõe as atualizações.
+
+Avisos de segurança aceitos de propósito ficam em `deny.toml`, cada um com o motivo. Hoje são dois do `quick-xml` 0.30, que só entra no Linux pelo `eframe`; saem quando o `eframe` for atualizado.

@@ -1,0 +1,18 @@
+version: 2
+updates:
+  # Crates do Cargo (o Cargo.lock está versionado: cada atualização chega como PR com CI).
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      # Atualizações de patch e minor juntas num PR só, para não inundar de PRs.
+      cargo-minor-patch:
+        update-types: [minor, patch]
+    open-pull-requests-limit: 5
+
+  # As ações do workflow estão fixadas por SHA; o Dependabot atualiza o SHA e o comentário.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

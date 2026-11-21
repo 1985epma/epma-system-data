@@ -1,0 +1,55 @@
+# Auditoria de dependências (cargo-deny): `make deny` ou o job "deny" do CI.
+# Cobre as quatro plataformas em que o programa roda, não só a da máquina atual.
+
+[graph]
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+]
+
+[advisories]
+version = 2
+# Crate retirada do crates.io (yanked) quebra builds futuros: tratar como erro.
+yanked = "deny"
+ignore = [
+    # Os dois avisos abaixo são do quick-xml 0.30, que chega só no Linux, por
+    # eframe 0.29 -> egui-winit -> accesskit_unix -> zbus_xml. Ele lê o XML de introspecção
+    # do D-Bus da própria sessão do usuário (entrada local, não remota), e o efeito é
+    # consumo de CPU ou memória, não execução de código. A saída é subir o eframe para uma
+    # versão que use accesskit_unix atualizado. REVISAR a cada atualização do eframe.
+    { id = "RUSTSEC-2026-0194", reason = "quick-xml 0.30 via accesskit_unix (só Linux); XML do D-Bus local; sobe com o eframe" },
+    { id = "RUSTSEC-2026-0195", reason = "quick-xml 0.30 via accesskit_unix (só Linux); XML do D-Bus local; sobe com o eframe" },
+]
+
+[licenses]
+version = 2
+# Só licenças permissivas (e MPL-2.0, copyleft fraco por arquivo). GPL, AGPL e LGPL
+# sozinhas ficam de fora. `r-efi` oferece "MIT OR Apache-2.0 OR LGPL": basta a primeira.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "0BSD",
+    "Unlicense",
+    "MPL-2.0",
+    # Fontes embutidas no egui (epaint_default_fonts): Ubuntu Font Licence e OFL.
+    "OFL-1.1",
+    "LicenseRef-UFL-1.0",
+]
+
+[bans]
+# O egui puxa versões duplicadas de várias crates; é ruído que não controlamos.
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
