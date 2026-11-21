@@ -1,13 +1,21 @@
+use std::process::ExitCode;
+
 use eframe::egui;
-use epma_system_data::{app::App, categories, scanner, util::format_bytes};
+use epma_system_data::{app::App, cli};
 
-fn main() -> eframe::Result {
-    // `--scan` imprime o relatório no terminal, sem abrir a janela.
-    if std::env::args().any(|a| a == "--scan") {
-        print_report();
-        return Ok(());
+fn main() -> ExitCode {
+    // Sem argumentos (duplo clique no .app, ou `epma-system-data`): abre a janela.
+    // Qualquer subcomando ou flag cai no CLI, que devolve o código de saída.
+    if std::env::args_os().len() <= 1 {
+        return gui();
     }
+    match cli::run(std::env::args_os()) {
+        cli::Outcome::Gui => gui(),
+        cli::Outcome::Exit(code) => code,
+    }
+}
 
+fn gui() -> ExitCode {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("EPMA System Data")
@@ -15,23 +23,15 @@ fn main() -> eframe::Result {
             .with_min_inner_size([680.0, 480.0]),
         ..Default::default()
     };
-    eframe::run_native(
+    match eframe::run_native(
         "EPMA System Data",
         options,
         Box::new(|cc| Ok(Box::new(App::new(cc)))),
-    )
-}
-
-fn print_report() {
-    let mut total = 0;
-    for cat in categories::all() {
-        let scan = scanner::scan(&cat);
-        let size = match &scan.note {
-            Some(note) if scan.items.is_some() || scan.unavailable => note.clone(),
-            _ => format_bytes(scan.total),
-        };
-        println!("{:<44} {size}", cat.name);
-        total += scan.total;
+    ) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("erro: não foi possível abrir a janela: {e}");
+            ExitCode::FAILURE
+        }
     }
-    println!("{:<44} {}", "Total em arquivos", format_bytes(total));
 }

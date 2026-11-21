@@ -10,6 +10,7 @@ use eframe::egui::{self, Align, Align2, Color32, Layout, RichText};
 
 use crate::categories::{self, Category, Risk, Target};
 use crate::cleaner::{self, CleanReport, Mode};
+use crate::plan;
 use crate::scanner::{self, Entry, ScanResult};
 use crate::util::{disk_space, display_path, format_bytes};
 
@@ -41,12 +42,7 @@ impl CatState {
     }
 
     fn chosen_entries(&self) -> Vec<Entry> {
-        self.scan
-            .iter()
-            .flat_map(|s| &s.entries)
-            .filter(|e| !self.deselected.contains(&e.path))
-            .cloned()
-            .collect()
+        plan::chosen_entries(self.scan.as_ref(), &self.deselected)
     }
 
     fn chosen_bytes(&self) -> u64 {
@@ -55,13 +51,7 @@ impl CatState {
 
     /// Algo selecionado que de fato será limpo.
     fn has_work(&self) -> bool {
-        if !self.selected || !self.available() {
-            return false;
-        }
-        match &self.cat.target {
-            Target::DirContents { .. } => !self.chosen_entries().is_empty(),
-            Target::Command { .. } => self.scan.as_ref().and_then(|s| s.items).unwrap_or(0) > 0,
-        }
+        plan::has_work(&self.cat, self.scan.as_ref(), self.selected, &self.deselected)
     }
 }
 
@@ -171,10 +161,7 @@ impl App {
                     self.cleaning = false;
                     self.disk = disk_space("/");
                     if self.mode == Mode::Trash {
-                        self.log.push(
-                            "Itens movidos para a Lixeira. Esvazie a Lixeira para liberar o espaço."
-                                .into(),
-                        );
+                        self.log.push(plan::TRASH_NOTICE.into());
                     }
                 }
             }
@@ -182,34 +169,8 @@ impl App {
     }
 
     fn log_report(&mut self, i: usize, report: &CleanReport) {
-        let name = self.cats[i].cat.name;
-        let mut line = match self.cats[i].cat.target {
-            Target::Command { .. } if report.failures.is_empty() => format!("{name}: concluído"),
-            Target::Command { .. } => format!("{name}: falhou"),
-            Target::DirContents { .. } => format!(
-                "{name}: {} itens, {} {}",
-                report.removed,
-                format_bytes(report.freed),
-                if self.mode == Mode::Trash { "na Lixeira" } else { "liberados" },
-            ),
-        };
-        if !report.failures.is_empty() {
-            line.push_str(&format!(" — {} falha(s)", report.failures.len()));
-        }
-        self.log.push(line);
-        for (path, err) in report.failures.iter().take(5) {
-            let err: String = if err.contains("permission") {
-                "sem permissão (protegido pelo macOS)".into()
-            } else {
-                err.chars().take(120).collect()
-            };
-            self.log.push(format!("    {}: {err}", display_path(path)));
-        }
-        if let Some(out) = report.output.as_deref().filter(|o| !o.is_empty()) {
-            for l in out.lines().take(5) {
-                self.log.push(format!("    {l}"));
-            }
-        }
+        let lines = plan::report_lines(&self.cats[i].cat, report, self.mode);
+        self.log.extend(lines);
     }
 
     fn busy(&self) -> bool {
