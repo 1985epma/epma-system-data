@@ -118,16 +118,17 @@ Todas as cores são **tokens** com o mesmo nome nos dois temas. Nada de cor fixa
 
 | Token | Claro | Escuro |
 |---|---|---|
-| Fundo da janela | `#F8FAFC` | `#0B1220` |
-| Cartão / painel | `#FFFFFF` | `#111827` |
-| Borda | `#E2E8F0` | `#2A3548` |
-| Texto | `#1E293B` | `#E2E8F0` |
-| Texto secundário | `#64748B` | `#94A3B8` |
+| Fundo da janela | `#F8FAFC` | `#0A0A0A` (preto neutro) |
+| Cartão / painel | `#FFFFFF` | `#121212` |
+| Borda | `#E2E8F0` | `#2A2A2A` |
+| Texto | `#1E293B` | `#E5E5E5` |
+| Texto secundário | `#64748B` | `#A3A3A3` |
 | Destaque (botão, checkbox) | `#2563EB` | `#3B82F6` |
 | Destaque em texto/links | `#2563EB` | `#93C5FD` |
 | Seguro / Revisar / Erro (fundo suave) | verde, âmbar, vermelho claros | os mesmos matizes em tom escuro translúcido, com texto claro |
 
 Regras que valem nos dois temas:
+- O escuro é **preto neutro** (cinzas sem tom azulado). O azul aparece só como destaque.
 - Uma única cor de destaque; o azul fica **um tom mais claro no escuro** para manter contraste com o texto branco do botão.
 - As cores semânticas mudam de **fundo e texto**, não de significado: vermelho continua sendo "crítico/irreversível".
 - A cor do botão primário não muda no hover por "clarear" (no escuro isso estoura): usa um token `accent-hover` próprio.
