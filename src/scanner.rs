@@ -34,9 +34,11 @@ pub struct ScanResult {
 
 pub fn scan(cat: &Category) -> ScanResult {
     match &cat.target {
-        Target::DirContents { dirs, exclude } => {
-            scan_dirs_within(dirs, exclude, dirs::home_dir().as_deref())
-        }
+        Target::DirContents {
+            dirs,
+            exclude,
+            paths,
+        } => scan_targets(dirs, exclude, paths, dirs::home_dir().as_deref()),
         Target::Command { probe, .. } => run_probe(probe),
     }
 }
@@ -48,6 +50,17 @@ pub fn scan_dirs(dirs: &[PathBuf], exclude: &[&str]) -> ScanResult {
 /// Com `home`, ignora (e avisa) diretórios que sejam links simbólicos para fora dela:
 /// a limpeza os recusaria de qualquer jeito, e medi-los mostraria um número enganoso.
 pub fn scan_dirs_within(dirs: &[PathBuf], exclude: &[&str], home: Option<&Path>) -> ScanResult {
+    scan_targets(dirs, exclude, &[], home)
+}
+
+/// Como `scan_dirs_within`, e ainda mede cada caminho de `paths` que existir como um item
+/// inteiro. Um caminho dentro de pasta protegida (TCC) conta como negado, não como ausente.
+pub fn scan_targets(
+    dirs: &[PathBuf],
+    exclude: &[&str],
+    paths: &[PathBuf],
+    home: Option<&Path>,
+) -> ScanResult {
     let mut res = ScanResult::default();
     let mut denied = false;
     let mut notes: Vec<String> = Vec::new();
@@ -80,6 +93,37 @@ pub fn scan_dirs_within(dirs: &[PathBuf], exclude: &[&str], home: Option<&Path>)
             let path = child.path();
             let size = dir_size(&path, &mut res.errors);
             res.entries.push(Entry { path, size });
+        }
+    }
+
+    for path in paths {
+        if let Some(home) = home {
+            let parent_ok = path.parent().is_some_and(|p| real_dir_inside_home(p, home));
+            if fs::canonicalize(path.parent().unwrap_or(path)).is_ok() && !parent_ok {
+                res.errors += 1;
+                notes.push(format!(
+                    "{} fica fora da sua pasta de usuário (link simbólico) e foi ignorado.",
+                    crate::util::display_path(path)
+                ));
+                continue;
+            }
+        }
+        match fs::symlink_metadata(path) {
+            Ok(_) => {
+                if res.entries.iter().any(|e| &e.path == path) {
+                    continue;
+                }
+                let size = dir_size(path, &mut res.errors);
+                res.entries.push(Entry {
+                    path: path.clone(),
+                    size,
+                });
+            }
+            Err(e) if e.kind() == ErrorKind::NotFound => {}
+            Err(e) => {
+                denied |= e.kind() == ErrorKind::PermissionDenied;
+                res.errors += 1;
+            }
         }
     }
 

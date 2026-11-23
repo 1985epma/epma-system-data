@@ -17,6 +17,28 @@ App nativo para macOS, escrito em Rust ([egui/eframe](https://github.com/emilk/e
 | Caches de ferramentas dev | `~/.npm/_cacache`, `~/.gradle/caches`, `~/.cargo/registry/cache`, `~/.cache` | revisar |
 | Xcode Archives | `~/Library/Developer/Xcode/Archives` | revisar |
 | Backups de iPhone/iPad | `~/Library/Application Support/MobileSync/Backup` | revisar |
+| Safari: caches | `~/Library/Caches/com.apple.Safari`, ícones em `~/Library/Safari` | marcado |
+| Safari: histórico e downloads | `~/Library/Safari/History.db`, `Downloads.plist`, abas recentes | revisar |
+| Safari: cookies e dados de sites | `Cookies.binarycookies`, `LocalStorage`, `WebsiteData` | revisar |
+| Safari: dados de extensões | `WebExtensions`, `AppExtensions`, `Extensions` | revisar |
+| Edge: caches | `Cache`, `Code Cache`, `GPUCache`, Service Workers (todos os perfis) | marcado |
+| Edge: histórico e downloads | `History`, `Top Sites`, `Favicons`, `Sessions` (todos os perfis) | revisar |
+| Edge: cookies e dados de sites | `Network/Cookies`, `Local Storage`, `IndexedDB` (todos os perfis) | revisar |
+| Edge: extensões e seus dados | `Extensions`, `Local Extension Settings` (todos os perfis) | revisar |
+
+### Navegadores (Safari e Edge)
+
+Para limpar tudo de navegador de uma vez: na janela, **Marcar navegadores**; no terminal, `--only browsers`.
+
+```bash
+epma-system-data clean --only browsers --dry-run
+```
+
+```bash
+epma-system-data clean --only browsers
+```
+
+Só entram dados de limpeza. Senhas (`Login Data`), favoritos, preferências, preenchimento automático e o `Local State` do Edge nunca são tocados; para remover um perfil inteiro use `edge://settings/profiles`. Cookies e dados de sites desconectam você dos sites. Feche o Safari e o Edge antes, e conceda Acesso Total ao Disco para o Safari.
 
 Categorias "revisar" começam desmarcadas. Dá para expandir cada categoria e desmarcar itens individuais, ou abrir o item no Finder.
 
@@ -28,7 +50,7 @@ Categorias "revisar" começam desmarcadas. Dá para expandir cada categoria e de
 - A trava confere o caminho **real**, não só o texto: se uma pasta de categoria (por exemplo `~/Library/Caches`) for um link para fora da sua pasta de usuário, ela é ignorada com um aviso e nada é apagado lá. Isso vale também para quem moveu o cache para um disco externo por link simbólico: nesse caso, limpe pelo próprio disco.
 - Só uma limpeza roda por vez no seu usuário (janela, terminal e agendamento dividem a mesma trava). A segunda recusa com "outra limpeza está em andamento" em vez de disputar os mesmos arquivos.
 - Tamanhos: arquivos com vários hard links contam uma vez só. Clones do APFS não aparecem para o sistema de arquivos e continuam somando por inteiro, então o número pode ficar acima do espaço que volta de fato.
-- Caches ligados a iCloud, Casa, Buscar e Safari ficam de fora.
+- Caches ligados a iCloud, Casa e Buscar ficam de fora. O cache do Safari sai só pela categoria própria dele.
 - Feche os apps antes de limpar os caches deles.
 
 Algumas pastas (Mail, backups) exigem **Acesso Total ao Disco**: Ajustes > Privacidade e Segurança > Acesso Total ao Disco > adicione o app (ou o Terminal, se rodar via `cargo run`).

@@ -253,6 +253,21 @@ impl App {
                 {
                     rescan = true;
                 }
+                if ui
+                    .add_enabled(!busy, egui::Button::new("Marcar navegadores"))
+                    .on_hover_text(
+                        "Marca todas as categorias de Safari e Edge, inclusive as de revisar",
+                    )
+                    .clicked()
+                {
+                    for state in self
+                        .cats
+                        .iter_mut()
+                        .filter(|c| categories::is_browser(&c.cat))
+                    {
+                        state.selected = true;
+                    }
+                }
                 if busy {
                     ui.spinner();
                 }

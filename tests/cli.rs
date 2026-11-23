@@ -57,7 +57,7 @@ fn list_json_has_all_categories_with_defaults() {
     assert!(out.status.success());
     let rows: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     let rows = rows.as_array().unwrap();
-    assert_eq!(rows.len(), 11);
+    assert_eq!(rows.len(), 19);
     let backups = rows.iter().find(|r| r["id"] == "ios_backups").unwrap();
     assert_eq!(backups["risk"], "review");
     assert_eq!(backups["selected_by_default"], false);
@@ -437,4 +437,89 @@ fn permission_failures_are_reported_in_plain_language_with_a_kind() {
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("sem permissão"), "{text}");
     assert!(!text.contains("os error"), "{text}");
+}
+
+/// HOME com Edge (Default + Profile 1) e dados que NUNCA podem ser tocados.
+fn edge_fixture() -> tempfile::TempDir {
+    let home = fixture();
+    let root = home
+        .path()
+        .join("Library/Application Support/Microsoft Edge");
+    for profile in ["Default", "Profile 1"] {
+        let p = root.join(profile);
+        fs::create_dir_all(p.join("Cache")).unwrap();
+        fs::write(p.join("Cache/data_0"), vec![1u8; 32 * 1024]).unwrap();
+        fs::create_dir_all(p.join("Network")).unwrap();
+        fs::write(p.join("Network/Cookies"), vec![1u8; 8 * 1024]).unwrap();
+        fs::write(p.join("History"), vec![1u8; 8 * 1024]).unwrap();
+        fs::create_dir_all(p.join("Extensions/abc")).unwrap();
+        fs::write(p.join("Extensions/abc/m.json"), b"{}").unwrap();
+        // Dados do usuário que não são "limpeza".
+        fs::write(p.join("Login Data"), b"senhas").unwrap();
+        fs::write(p.join("Bookmarks"), b"favoritos").unwrap();
+        fs::write(p.join("Preferences"), b"{}").unwrap();
+        fs::write(p.join("Web Data"), b"autofill").unwrap();
+    }
+    fs::write(root.join("Local State"), b"{}").unwrap();
+    home
+}
+
+#[test]
+fn browsers_alias_scans_every_edge_profile() {
+    let home = edge_fixture();
+    let out = bin(home.path())
+        .args(["scan", "--only", "browsers", "--details", "--json"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let cats = v["categories"].as_array().unwrap();
+    assert_eq!(cats.len(), 8);
+    let find = |id: &str| cats.iter().find(|c| c["id"] == id).unwrap();
+    assert_eq!(find("edge_cache")["entry_count"], 2, "um Cache por perfil");
+    assert_eq!(find("edge_history")["entry_count"], 2);
+    assert_eq!(find("edge_site_data")["entry_count"], 2);
+    assert_eq!(find("edge_extensions")["entry_count"], 2);
+}
+
+#[test]
+fn browsers_clean_removes_only_cleanup_data_and_keeps_user_data() {
+    let home = edge_fixture();
+    let root = home
+        .path()
+        .join("Library/Application Support/Microsoft Edge");
+    bin(home.path())
+        .args(["clean", "--only", "browsers", "--permanent", "--yes"])
+        .assert()
+        .success();
+    for profile in ["Default", "Profile 1"] {
+        let p = root.join(profile);
+        for gone in ["Cache", "Network/Cookies", "History", "Extensions"] {
+            assert!(!p.join(gone).exists(), "{profile}/{gone} devia sumir");
+        }
+        for kept in ["Login Data", "Bookmarks", "Preferences", "Web Data"] {
+            assert!(p.join(kept).exists(), "{profile}/{kept} foi apagado!");
+        }
+    }
+    assert!(root.join("Local State").exists());
+    // As categorias fora de navegador não foram tocadas.
+    assert!(home.path().join("Library/Logs/app.log").exists());
+}
+
+#[test]
+fn default_clean_takes_edge_cache_but_not_history_or_cookies() {
+    let home = edge_fixture();
+    let root = home
+        .path()
+        .join("Library/Application Support/Microsoft Edge/Default");
+    bin(home.path())
+        .args(["clean", "--permanent", "--yes"])
+        .assert()
+        .success();
+    assert!(!root.join("Cache").exists());
+    assert!(
+        root.join("History").exists(),
+        "histórico é categoria revisar"
+    );
+    assert!(root.join("Network/Cookies").exists());
 }

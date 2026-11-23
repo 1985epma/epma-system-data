@@ -148,6 +148,7 @@ impl Default for ScanArgs {
 #[derive(Args, Debug)]
 struct CleanArgs {
     /// Limpa exatamente estas categorias, mesmo as "revisar" (ids de `list`).
+    /// `browsers` seleciona de uma vez todas as de Safari e Edge.
     #[arg(short, long, value_name = "ID", value_delimiter = ',')]
     only: Vec<String>,
 
@@ -417,10 +418,23 @@ fn disk_line(d: &DiskJson) -> String {
 
 // ------------------------------------------------------------ seleção
 
+/// Em `--only`/`--exclude`, expande para todas as categorias de navegador.
+const BROWSERS_ALIAS: &str = "browsers";
+
 /// Índices (na ordem do catálogo) das categorias citadas em `ids`.
 fn lookup_ids(cats: &[Category], ids: &[String]) -> Result<Vec<usize>, CliError> {
     let mut found = HashSet::new();
     for id in ids {
+        // Atalho: todas as categorias de navegador (Safari e Edge) de uma vez.
+        if id == BROWSERS_ALIAS {
+            found.extend(
+                cats.iter()
+                    .enumerate()
+                    .filter(|(_, c)| categories::is_browser(c))
+                    .map(|(i, _)| i),
+            );
+            continue;
+        }
         match cats.iter().position(|c| c.id == id) {
             Some(i) => {
                 found.insert(i);
@@ -428,7 +442,7 @@ fn lookup_ids(cats: &[Category], ids: &[String]) -> Result<Vec<usize>, CliError>
             None => {
                 let valid: Vec<&str> = cats.iter().map(|c| c.id).collect();
                 return Err(CliError::Usage(format!(
-                    "categoria desconhecida: `{id}`. Disponíveis: {}",
+                    "categoria desconhecida: `{id}`. Disponíveis: {}, ou `{BROWSERS_ALIAS}` (todas as de navegador)",
                     valid.join(", ")
                 )));
             }
