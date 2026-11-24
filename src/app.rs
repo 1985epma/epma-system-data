@@ -1,6 +1,6 @@
 //! Interface gráfica (egui/eframe): sidebar, barra superior, cartão-resumo, categorias em
 //! seções (Seguro / Revisar), estados de carregamento, vazio e erro, tema claro/escuro e
-//! pt-BR/en-US. Veja `outputs/PROPOSTA.md` para o desenho.
+//! pt-BR/en-US.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
