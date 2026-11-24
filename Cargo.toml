@@ -1,6 +1,6 @@
 [package]
 name = "epma-system-data"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 description = "Limpeza de System Data no macOS com interface nativa em Rust"
 license = "MIT"
