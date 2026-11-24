@@ -234,7 +234,6 @@ tests/
   cli.rs         contrato do CLI (códigos de saída, dry-run, segurança)
 .github/
   workflows/ci.yml   formatação, clippy, testes (macOS e Linux) e auditoria
-  dependabot.yml     atualizações semanais de crates e ações
 deny.toml        licenças permitidas e avisos de segurança (cargo-deny)
 Dockerfile.test  Linux para `make test-linux`
 Makefile         os mesmos comandos do CI
@@ -256,7 +255,7 @@ Roda o que o CI roda: `fmt-check`, `lint` (clippy sem avisos), `test` e `deny`. 
 | `make test-linux` | Testes em Linux dentro do Docker (precisa do Docker) |
 | `make deny` | Licenças e avisos de segurança das dependências (`cargo install cargo-deny`) |
 
-O CI (`.github/workflows/ci.yml`) roda em cada push e PR: formatação, clippy e testes em macOS (Apple Silicon e Intel) e Linux, mais a auditoria de dependências, que também roda toda segunda-feira para pegar avisos novos sem precisar de commit. As ações do GitHub estão fixadas por SHA e o Dependabot propõe as atualizações.
+O CI (`.github/workflows/ci.yml`) roda em cada push e PR: formatação, clippy e testes em macOS (Apple Silicon e Intel) e Linux, mais a auditoria de dependências, que também roda toda segunda-feira para pegar avisos novos sem precisar de commit. As ações do GitHub estão fixadas por SHA. As atualizações de dependência são feitas à mão (o Dependabot de atualização de versão está desligado); os alertas de segurança do repositório continuam ativos.
 
 ### Ver cada estado da janela
 
