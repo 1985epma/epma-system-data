@@ -4,6 +4,11 @@ use std::path::Path;
 
 /// Formata bytes em base 1000, como o Finder ("1,5 GB").
 pub fn format_bytes(bytes: u64) -> String {
+    format_bytes_with(bytes, ',')
+}
+
+/// Como `format_bytes`, com o separador decimal do idioma (`,` em pt-BR, `.` em en-US).
+pub fn format_bytes_with(bytes: u64, decimal: char) -> String {
     const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
     if bytes < 1000 {
         return format!("{bytes} B");
@@ -14,7 +19,7 @@ pub fn format_bytes(bytes: u64) -> String {
         value /= 1000.0;
         unit += 1;
     }
-    format!("{value:.1} {}", UNITS[unit]).replace('.', ",")
+    format!("{value:.1} {}", UNITS[unit]).replace('.', &decimal.to_string())
 }
 
 /// Troca o prefixo da pasta do usuário por `~`.
@@ -57,6 +62,9 @@ mod tests {
         assert_eq!(format_bytes(0), "0 B");
         assert_eq!(format_bytes(999), "999 B");
         assert_eq!(format_bytes(1_500), "1,5 KB");
+        assert_eq!(format_bytes_with(1_500, '.'), "1.5 KB");
+        assert_eq!(format_bytes_with(2_340_000_000, '.'), "2.3 GB");
+        assert_eq!(format_bytes_with(999, '.'), "999 B");
         assert_eq!(format_bytes(2_340_000_000), "2,3 GB");
     }
 

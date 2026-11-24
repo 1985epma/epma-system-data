@@ -61,6 +61,12 @@ Algumas pastas (Mail, backups) exigem **Acesso Total ao Disco**: Ajustes > Priva
 brew tap 1985epma/systemdata
 ```
 
+Nas versões recentes do Homebrew, fórmulas de um tap de terceiros só carregam depois de você confiar nele (sem isso aparece `Refusing to load formula ... from untrusted tap`):
+
+```bash
+brew trust 1985epma/systemdata
+```
+
 ```bash
 brew install epma-system-data
 ```
@@ -68,6 +74,8 @@ brew install epma-system-data
 ```bash
 epma-system-data
 ```
+
+Para atualizar: `brew update && brew upgrade epma-system-data`.
 
 ## Rodar a partir do código
 
@@ -86,6 +94,22 @@ Gerar o `.app`:
 ```bash
 open "target/release/EPMA System Data.app"
 ```
+
+## A janela
+
+Sem argumentos o app abre a janela:
+
+- **Limpeza**: um cartão mostra quanto dá para liberar agora e outro, o uso do disco (aviso a 90%, crítico a 95%, os mesmos limites do `diag`). As categorias aparecem em **Seguro** (marcadas) e **Revisar** (desmarcadas), da maior para a menor; as vazias ficam num grupo recolhido. Clique numa categoria para ver os itens, desmarcar um por um ou abrir no Finder pelo menu `•••`.
+- **Discos**: o mesmo diagnóstico do `diag` (discos físicos, SMART e volumes), somente leitura.
+- **Histórico**: o que cada limpeza da sessão fez, com as falhas.
+- **Ajustes**: idioma e tema.
+- Confirmação antes de limpar. **Exclusão permanente** exige digitar a palavra de confirmação (`apagar` em pt-BR, `delete` em en-US).
+- Erros aparecem no próprio lugar, nunca em pop-up; o de permissão tem um botão que abre os Ajustes do Sistema.
+- Atalhos: **⌘K** foca o filtro de categorias e **⌘R** reescaneia.
+
+**Tema e idioma.** O tema (claro, escuro ou automático) e o idioma (pt-BR, en-US ou automático) seguem o sistema por padrão; os botões na barra superior alternam na hora e **Ajustes** volta ao automático. A escolha fica em `~/Library/Application Support/epma-system-data/prefs`. O destino da limpeza (Lixeira ou permanente) nunca é lembrado: a janela sempre abre em Lixeira. A linha de comando continua em português.
+
+A fonte é a [Inter](https://rsms.me/inter/) (licença OFL, em `assets/fonts/`).
 
 ## Linha de comando
 
@@ -177,11 +201,17 @@ src/
   diag.rs        diagnóstico de discos (macOS e Linux)
   lock.rs        trava: uma limpeza por vez
   plan.rs        seleção e relatório compartilhados pela janela e pelo CLI
-  app.rs         interface egui
+  app.rs         janela egui: telas, estados e confirmação
+  theme.rs       paleta claro/escuro, fonte e Visuals do egui
+  widgets.rs     componentes (cartão, pílula, checkbox, banner, skeleton)
+  i18n.rs        textos em pt-BR e en-US (só a janela)
+  prefs.rs       idioma e tema escolhidos, guardados em arquivo
   categories.rs  o que é limpo e onde
   scanner.rs     medição em disco (threads em segundo plano)
   cleaner.rs     Lixeira / exclusão + trava de segurança
   util.rs        formatação e espaço em disco
+assets/
+  fonts/         Inter (Regular e SemiBold) e a licença
 scripts/
   bundle-macos.sh
 tests/
@@ -211,5 +241,15 @@ Roda o que o CI roda: `fmt-check`, `lint` (clippy sem avisos), `test` e `deny`. 
 | `make deny` | Licenças e avisos de segurança das dependências (`cargo install cargo-deny`) |
 
 O CI (`.github/workflows/ci.yml`) roda em cada push e PR: formatação, clippy e testes em macOS (Apple Silicon e Intel) e Linux, mais a auditoria de dependências, que também roda toda segunda-feira para pegar avisos novos sem precisar de commit. As ações do GitHub estão fixadas por SHA e o Dependabot propõe as atualizações.
+
+### Ver cada estado da janela
+
+Em build de **debug**, `EPMA_PREVIEW` abre a janela direto num estado, e `EPMA_WINDOW=680x560` define o tamanho. Com `EPMA_PREVIEW` definida a janela **nunca executa limpeza**; mesmo assim, aponte `HOME` para uma pasta de teste para não escanear os seus arquivos.
+
+```bash
+HOME=/tmp/casa-de-teste EPMA_PREVIEW=confirm,permanent cargo run
+```
+
+Valores (separados por vírgula): `disks`, `history`, `settings`, `confirm`, `permanent`, `details`, `denied`, `done`, `fail`, `busy`, `empty`, `expand:ID`, `filter:texto`. No release a variável é ignorada.
 
 Avisos de segurança aceitos de propósito ficam em `deny.toml`, cada um com o motivo. Hoje são dois do `quick-xml` 0.30, que só entra no Linux pelo `eframe`; saem quando o `eframe` for atualizado.

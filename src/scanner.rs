@@ -30,6 +30,8 @@ pub struct ScanResult {
     pub note: Option<String>,
     /// A ferramenta necessária não existe nesta máquina.
     pub unavailable: bool,
+    /// O macOS negou a leitura (falta Acesso Total ao Disco).
+    pub denied: bool,
 }
 
 pub fn scan(cat: &Category) -> ScanResult {
@@ -129,6 +131,7 @@ pub fn scan_targets(
 
     res.entries.sort_by_key(|e| std::cmp::Reverse(e.size));
     res.total = res.entries.iter().map(|e| e.size).sum();
+    res.denied = denied;
     if denied {
         notes.push(
             "Sem permissão de leitura. Conceda Acesso Total ao Disco em Ajustes > Privacidade e Segurança."
