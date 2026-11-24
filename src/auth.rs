@@ -56,11 +56,11 @@ pub fn validate_password(_password: &str) -> AuthOutcome {
     AuthOutcome::Ok
 }
 
-#[cfg(test)]
+// Os testes usam `dscl`, que só existe no macOS.
+#[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn wrong_password_is_rejected() {
         // Uma senha claramente errada nunca deve validar (não usamos a senha real em teste).
@@ -70,7 +70,6 @@ mod tests {
         );
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn empty_password_does_not_authenticate() {
         assert_ne!(validate_password(""), AuthOutcome::Ok);
