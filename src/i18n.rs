@@ -200,6 +200,11 @@ keys! {
     DeletePermWarn => "Não dá para desfazer. Os itens não passam pela Lixeira.", "This can't be undone. Items skip the Trash.";
     TypeToConfirm => "Digite {} para confirmar", "Type {} to confirm";
     ConfirmWord => "apagar", "delete";
+    PasswordPrompt => "Digite a senha do seu usuário do Mac para confirmar", "Type your Mac user password to confirm";
+    PasswordNote => "Validação de identidade. A limpeza roda como você, sem privilégio de administrador.", "Identity check. The cleanup runs as you, without administrator privileges.";
+    Validating => "Validando…", "Checking…";
+    WrongPassword => "Senha incorreta. Tente de novo.", "Wrong password. Try again.";
+    AuthUnavailable => "Não foi possível validar a senha nesta máquina.", "Could not validate the password on this machine.";
     DeletePermanently => "Excluir permanentemente", "Delete permanently";
 
     // Discos

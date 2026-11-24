@@ -1,6 +1,7 @@
 //! EPMA System Data — núcleo de varredura e limpeza de "System Data" no macOS.
 
 pub mod app;
+pub mod auth;
 pub mod categories;
 pub mod cleaner;
 pub mod cli;

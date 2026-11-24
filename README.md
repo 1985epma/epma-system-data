@@ -60,6 +60,7 @@ Categorias "revisar" começam desmarcadas. Dá para expandir cada categoria e de
 ## Segurança
 
 - **Mover para a Lixeira** é o modo padrão; o espaço só volta ao esvaziar a Lixeira. "Excluir permanentemente" é opcional e pede confirmação.
+- **Na janela, toda limpeza pede a senha do seu usuário do Mac** antes de apagar qualquer coisa, como validação de identidade — a responsabilidade é sua. A senha é checada com `dscl . -authonly` (passada pelo stdin, nunca como argumento, então não aparece em `ps`), **não é guardada nem registrada**, e **não eleva privilégio**: a limpeza roda como o seu usuário, sem `sudo`/admin. Sem a senha correta, nada é apagado. (A linha de comando não pede senha; ela mantém a confirmação por digitação e o `--yes` para agendamento.)
 - Só remove caminhos **dentro da sua pasta de usuário**, pelo menos dois níveis abaixo dela (ex.: `~/Library/Caches/app`). Nunca toca `/System`, `/Library` nem precisa de `sudo`.
 - Links simbólicos são removidos como links; o destino nunca é seguido.
 - A trava confere o caminho **real**, não só o texto: se uma pasta de categoria (por exemplo `~/Library/Caches`) for um link para fora da sua pasta de usuário, ela é ignorada com um aviso e nada é apagado lá. Isso vale também para quem moveu o cache para um disco externo por link simbólico: nesse caso, limpe pelo próprio disco.

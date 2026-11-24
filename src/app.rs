@@ -14,6 +14,7 @@ use eframe::egui::{
     RichText, Rounding, Sense, Stroke, Ui,
 };
 
+use crate::auth::{self, AuthOutcome};
 use crate::categories::{self, Category, Risk, Target};
 use crate::cleaner::{self, CleanReport, Failure, Mode};
 use crate::diag;
@@ -40,6 +41,8 @@ enum Msg {
     /// Outra limpeza (outra janela ou o terminal) está rodando: nada foi feito.
     Busy(String),
     Disks(Box<diag::Report>),
+    /// Resultado da validação da senha antes de uma limpeza.
+    Authenticated(AuthOutcome),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -221,7 +224,12 @@ pub struct App {
     rx: Receiver<Msg>,
     cleaning: bool,
     confirm_open: bool,
-    confirm_text: String,
+    /// Senha digitada no modal de confirmação (some assim que é validada).
+    password: String,
+    /// Validando a senha em segundo plano.
+    authenticating: bool,
+    /// Último resultado de validação que falhou, para mostrar no modal.
+    auth_error: Option<AuthOutcome>,
     disk: Option<(u64, u64)>,
     scanned_at: Option<Instant>,
 
@@ -272,7 +280,9 @@ impl App {
             rx,
             cleaning: false,
             confirm_open: false,
-            confirm_text: String::new(),
+            password: String::new(),
+            authenticating: false,
+            auth_error: None,
             disk: None,
             scanned_at: None,
             current: Vec::new(),
@@ -499,6 +509,18 @@ impl App {
                     });
                 }
                 Msg::Disks(report) => self.disks = DiskState::Ready(report),
+                Msg::Authenticated(outcome) => {
+                    // Se o usuário cancelou enquanto validava, ignoramos o resultado.
+                    if self.authenticating {
+                        self.authenticating = false;
+                        if outcome == AuthOutcome::Ok {
+                            self.close_confirm();
+                            self.start_clean(ctx);
+                        } else {
+                            self.auth_error = Some(outcome);
+                        }
+                    }
+                }
             }
         }
     }
@@ -542,7 +564,28 @@ impl App {
 
     fn close_confirm(&mut self) {
         self.confirm_open = false;
-        self.confirm_text.clear();
+        self.password.clear();
+        self.authenticating = false;
+        self.auth_error = None;
+    }
+
+    /// Valida a senha em segundo plano; o resultado volta como `Msg::Authenticated`.
+    fn authenticate(&mut self, ctx: &egui::Context) {
+        if self.authenticating || self.password.is_empty() {
+            return;
+        }
+        self.authenticating = true;
+        self.auth_error = None;
+        // A senha sai do campo (fica só na thread, por instantes) e é descartada ao fim.
+        let password = std::mem::take(&mut self.password);
+        let tx = self.tx.clone();
+        let ctx = ctx.clone();
+        thread::spawn(move || {
+            let outcome = auth::validate_password(&password);
+            drop(password);
+            let _ = tx.send(Msg::Authenticated(outcome));
+            ctx.request_repaint();
+        });
     }
 
     fn sidebar(&mut self, ctx: &egui::Context, p: &Palette, narrow: bool) {
@@ -1759,9 +1802,8 @@ impl App {
             })
             .sum();
         let permanent = self.mode == Mode::Permanent;
-        let word = i18n::t(lang, Key::ConfirmWord);
-        let typed_ok = self.confirm_text.trim().eq_ignore_ascii_case(word);
-        let mut go = false;
+        let busy = self.authenticating;
+        let mut submit = false;
         let mut cancel = false;
 
         // Fundo escurecido: também impede clicar no que está atrás.
@@ -1865,46 +1907,63 @@ impl App {
                     });
                 ui.add_space(6.0);
 
+                // Aviso do destino (vermelho no permanente, azul na Lixeira).
                 if permanent {
-                    egui::Frame::none()
-                        .fill(p.err_bg)
-                        .stroke(Stroke::new(1.0_f32, p.err_border))
-                        .rounding(Rounding::same(10.0))
-                        .inner_margin(Margin::symmetric(12.0, 8.0))
-                        .show(ui, |ui| {
-                            ui.set_width(ui.available_width());
-                            ui.label(
-                                RichText::new(format!("⚠  {}", i18n::t(lang, Key::DeletePermWarn)))
-                                    .color(p.err_fg),
-                            );
-                        });
-                    ui.add_space(4.0);
-                    ui.label(
-                        RichText::new(i18n::fmt1(lang, Key::TypeToConfirm, word))
-                            .size(12.5)
-                            .color(p.muted),
+                    info_box(
+                        ui,
+                        p,
+                        p.err_bg,
+                        p.err_border,
+                        p.err_fg,
+                        &format!("⚠  {}", i18n::t(lang, Key::DeletePermWarn)),
                     );
-                    let edit = egui::TextEdit::singleline(&mut self.confirm_text)
-                        .desired_width(f32::INFINITY)
-                        .font(FontId::monospace(14.0))
-                        .margin(vec2(10.0, 8.0));
-                    let resp = ui.add(edit);
-                    if !resp.has_focus() && self.confirm_text.is_empty() {
-                        resp.request_focus();
-                    }
                 } else {
-                    egui::Frame::none()
-                        .fill(p.info_bg)
-                        .rounding(Rounding::same(10.0))
-                        .inner_margin(Margin::symmetric(12.0, 8.0))
-                        .show(ui, |ui| {
-                            ui.set_width(ui.available_width());
-                            ui.label(RichText::new(i18n::t(lang, Key::TrashInfo)).color(p.info_fg));
-                        });
+                    info_box(
+                        ui,
+                        p,
+                        p.info_bg,
+                        p.info_bg,
+                        p.info_fg,
+                        i18n::t(lang, Key::TrashInfo),
+                    );
                     ui.label(
                         RichText::new(i18n::t(lang, Key::CloseApps))
                             .size(12.5)
                             .color(p.muted),
+                    );
+                }
+
+                // Porta de senha: vale para Lixeira e permanente.
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new(i18n::t(lang, Key::PasswordPrompt))
+                        .size(12.5)
+                        .color(p.text),
+                );
+                let edit = egui::TextEdit::singleline(&mut self.password)
+                    .password(true)
+                    .desired_width(f32::INFINITY)
+                    .margin(vec2(10.0, 8.0))
+                    .interactive(!busy);
+                let resp = ui.add(edit);
+                if !busy && !resp.has_focus() && self.auth_error.is_none() {
+                    resp.request_focus();
+                }
+                // Enter no campo confirma.
+                if resp.lost_focus() && ui.input(|i| i.key_pressed(EKey::Enter)) {
+                    submit = true;
+                }
+                if let Some(err) = self.auth_error {
+                    let key = match err {
+                        AuthOutcome::Wrong => Key::WrongPassword,
+                        _ => Key::AuthUnavailable,
+                    };
+                    ui.label(RichText::new(i18n::t(lang, key)).size(12.5).color(p.err_fg));
+                } else {
+                    ui.label(
+                        RichText::new(i18n::t(lang, Key::PasswordNote))
+                            .size(11.5)
+                            .color(p.faint),
                     );
                 }
 
@@ -1914,34 +1973,35 @@ impl App {
                     vec2(row_w, 36.0),
                     Layout::right_to_left(Align::Center),
                     |ui| {
-                        if permanent {
-                            let label = i18n::t(lang, Key::DeletePermanently);
-                            if widgets::primary_button(ui, p, label, typed_ok, true).clicked() {
-                                go = true;
-                            }
-                        } else if widgets::primary_button(
-                            ui,
-                            p,
-                            i18n::t(lang, Key::MoveToTrash),
-                            true,
-                            false,
-                        )
-                        .clicked()
-                        {
-                            go = true;
+                        let label = if permanent {
+                            i18n::t(lang, Key::DeletePermanently)
+                        } else {
+                            i18n::t(lang, Key::MoveToTrash)
+                        };
+                        let enabled = !busy && !self.password.is_empty();
+                        if widgets::primary_button(ui, p, label, enabled, permanent).clicked() {
+                            submit = true;
                         }
-                        if widgets::ghost_button(ui, i18n::t(lang, Key::Cancel), true).clicked() {
+                        if widgets::ghost_button(ui, i18n::t(lang, Key::Cancel), !busy).clicked() {
                             cancel = true;
+                        }
+                        if busy {
+                            ui.add_space(4.0);
+                            ui.spinner();
+                            ui.label(
+                                RichText::new(i18n::t(lang, Key::Validating))
+                                    .size(12.5)
+                                    .color(p.muted),
+                            );
                         }
                     },
                 );
             });
 
-        if go && (!permanent || typed_ok) {
+        if cancel && !self.authenticating {
             self.close_confirm();
-            self.start_clean(ctx);
-        } else if cancel {
-            self.close_confirm();
+        } else if submit && !self.authenticating && !self.password.is_empty() {
+            self.authenticate(ctx);
         }
     }
 }
@@ -2017,6 +2077,19 @@ fn nav_item(
 }
 
 /// Cartão de seção (Seguro / Revisar): cabeçalho com pílula, dica e subtotal.
+/// Caixa de aviso arredondada (usada no modal: info azul ou alerta vermelho).
+fn info_box(ui: &mut Ui, _p: &Palette, bg: Color32, border: Color32, fg: Color32, text: &str) {
+    egui::Frame::none()
+        .fill(bg)
+        .stroke(Stroke::new(1.0_f32, border))
+        .rounding(Rounding::same(10.0))
+        .inner_margin(Margin::symmetric(12.0, 8.0))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(RichText::new(text).color(fg));
+        });
+}
+
 fn section(
     ui: &mut Ui,
     p: &Palette,
@@ -2518,7 +2591,9 @@ impl eframe::App for App {
 
         match action {
             Action::Confirm => {
-                self.confirm_text.clear();
+                self.password.clear();
+                self.auth_error = None;
+                self.authenticating = false;
                 self.confirm_open = true;
             }
             Action::Rescan => self.scan_all(ctx),
