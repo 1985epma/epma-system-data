@@ -224,7 +224,11 @@ pub fn run_command(target: &Target) -> CleanReport {
         return CleanReport::default();
     };
     let mut report = CleanReport::default();
-    match Command::new(program).args(*args).output() {
+    match Command::new(program)
+        .args(*args)
+        .env("PATH", crate::util::tool_path())
+        .output()
+    {
         Ok(out) => {
             let mut text = String::from_utf8_lossy(&out.stdout).trim().to_string();
             let err = String::from_utf8_lossy(&out.stderr);

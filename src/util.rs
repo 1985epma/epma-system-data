@@ -2,6 +2,31 @@ use std::ffi::CString;
 use std::fs;
 use std::path::Path;
 
+/// PATH para rodar ferramentas externas (docker, etc.). Um `.app` aberto pelo Finder herda
+/// um PATH mínimo (`/usr/bin:/bin:…`), sem os diretórios do Homebrew nem do Docker, então
+/// `docker` não seria encontrado. Aqui juntamos os locais comuns ao PATH que já existe, sem
+/// duplicar. `xcrun` e `tmutil` continuam funcionando (ficam em `/usr/bin`).
+pub fn tool_path() -> String {
+    let mut dirs: Vec<String> = vec![
+        "/opt/homebrew/bin".into(),
+        "/usr/local/bin".into(),
+        "/usr/bin".into(),
+        "/bin".into(),
+        "/usr/sbin".into(),
+        "/sbin".into(),
+        "/Applications/Docker.app/Contents/Resources/bin".into(),
+    ];
+    if let Some(home) = dirs::home_dir() {
+        dirs.push(home.join(".docker/bin").to_string_lossy().into_owned());
+    }
+    if let Ok(current) = std::env::var("PATH") {
+        dirs.extend(current.split(':').map(str::to_string));
+    }
+    let mut seen = std::collections::HashSet::new();
+    dirs.retain(|d| !d.is_empty() && seen.insert(d.clone()));
+    dirs.join(":")
+}
+
 /// Formata bytes em base 1000, como o Finder ("1,5 GB").
 pub fn format_bytes(bytes: u64) -> String {
     format_bytes_with(bytes, ',')

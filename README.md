@@ -17,6 +17,9 @@ App nativo para macOS, escrito em Rust ([egui/eframe](https://github.com/emilk/e
 | Caches de ferramentas dev | `~/.npm/_cacache`, `~/.gradle/caches`, `~/.cargo/registry/cache`, `~/.cache` | revisar |
 | Xcode Archives | `~/Library/Developer/Xcode/Archives` | revisar |
 | Backups de iPhone/iPad | `~/Library/Application Support/MobileSync/Backup` | revisar |
+| Cache de plugins do Terraform | `~/.tf-plugin-cache` | revisar |
+| Docker: build cache, imagens e containers sem uso | `docker system prune -f` | revisar |
+| Docker: volumes sem uso | `docker volume prune -f` | revisar |
 | Safari: caches | `~/Library/Caches/com.apple.Safari`, ícones em `~/Library/Safari` | marcado |
 | Safari: histórico e downloads | `~/Library/Safari/History.db`, `Downloads.plist`, abas recentes | revisar |
 | Safari: cookies e dados de sites | `Cookies.binarycookies`, `LocalStorage`, `WebsiteData` | revisar |
@@ -39,6 +42,18 @@ epma-system-data clean --only browsers
 ```
 
 Só entram dados de limpeza. Senhas (`Login Data`), favoritos, preferências, preenchimento automático e o `Local State` do Edge nunca são tocados; para remover um perfil inteiro use `edge://settings/profiles`. Cookies e dados de sites desconectam você dos sites. Feche o Safari e o Edge antes, e conceda Acesso Total ao Disco para o Safari.
+
+### Docker
+
+Em máquinas de desenvolvimento o Docker costuma ser o maior item do "System Data" (a imagem de disco `Docker.raw` guarda build cache, imagens, containers e volumes). Duas categorias "revisar" usam o próprio Docker para limpar, e só aparecem quando o Docker está **em execução**:
+
+- **Docker: build cache, imagens e containers sem uso** — `docker system prune -f`. Remove build cache, imagens soltas, containers parados e redes sem uso. Não toca em volumes.
+- **Docker: volumes sem uso** — `docker volume prune -f`. ⚠️ Apaga volumes que nenhum container usa, o que **pode incluir dados de bancos de projetos parados**. Não dá para desfazer.
+
+Dois pontos importantes:
+
+- São **sempre permanentes** (como toda categoria de comando; não passam pela Lixeira), mesmo com o modo em "Lixeira".
+- O espaço só volta ao disco depois de **compactar a imagem do Docker**: o `Docker.raw` é um arquivo esparso do APFS e mantém o tamanho mesmo após o prune. No Docker Desktop: **Settings > Resources > Advanced > Clean / Purge data** (ou Troubleshoot > reset disk image).
 
 Categorias "revisar" começam desmarcadas. Dá para expandir cada categoria e desmarcar itens individuais, ou abrir o item no Finder.
 

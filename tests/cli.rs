@@ -57,7 +57,7 @@ fn list_json_has_all_categories_with_defaults() {
     assert!(out.status.success());
     let rows: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     let rows = rows.as_array().unwrap();
-    assert_eq!(rows.len(), 19);
+    assert_eq!(rows.len(), 22);
     let backups = rows.iter().find(|r| r["id"] == "ios_backups").unwrap();
     assert_eq!(backups["risk"], "review");
     assert_eq!(backups["selected_by_default"], false);

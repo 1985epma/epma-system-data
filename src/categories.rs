@@ -216,6 +216,52 @@ pub fn build(home: &Path) -> Vec<Category> {
                 paths: vec![],
             },
         },
+        Category {
+            id: "tf_plugin_cache",
+            name: "Cache de plugins do Terraform",
+            description: "~/.tf-plugin-cache — provedores do Terraform/OpenTofu. Baixados de novo no próximo init.",
+            risk: Risk::Review,
+            target: Target::DirContents {
+                dirs: vec![home.join(".tf-plugin-cache")],
+                exclude: &[],
+                paths: vec![],
+            },
+        },
+        // Categorias do Docker: sempre permanentes (como as de comando já são) e exigem o Docker
+        // em execução. O espaço só volta ao disco depois de compactar a imagem do Docker
+        // (Docker Desktop > Resources > Clean / Purge data); isso fica avisado na descrição.
+        Category {
+            id: "docker_prune",
+            name: "Docker: build cache, imagens e containers sem uso",
+            description: "docker system prune: remove build cache, imagens soltas, containers parados e redes sem uso. Não toca em volumes. Permanente. O espaço no disco só volta ao compactar a imagem do Docker (Docker Desktop > Resources > Clean / Purge data).",
+            risk: Risk::Review,
+            target: Target::Command {
+                program: "docker",
+                args: &["system", "prune", "-f"],
+                probe: Probe {
+                    program: "docker",
+                    args: &["system", "df"],
+                    count_lines_containing: "Build Cache",
+                    unit: "grupo(s) a limpar",
+                },
+            },
+        },
+        Category {
+            id: "docker_volumes",
+            name: "Docker: volumes sem uso",
+            description: "docker volume prune: apaga volumes que nenhum container usa. ⚠️ Pode apagar dados de bancos de projetos parados. Permanente, sem desfazer.",
+            risk: Risk::Review,
+            target: Target::Command {
+                program: "docker",
+                args: &["volume", "prune", "-f"],
+                probe: Probe {
+                    program: "docker",
+                    args: &["volume", "ls", "-qf", "dangling=true"],
+                    count_lines_containing: "",
+                    unit: "volume(s) sem uso",
+                },
+            },
+        },
     ];
     cats.extend(browsers(home));
     cats

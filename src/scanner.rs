@@ -171,12 +171,17 @@ pub fn dir_size(path: &Path, errors: &mut usize) -> u64 {
 
 fn run_probe(probe: &Probe) -> ScanResult {
     let mut res = ScanResult::default();
-    match Command::new(probe.program).args(probe.args).output() {
+    match Command::new(probe.program)
+        .args(probe.args)
+        .env("PATH", crate::util::tool_path())
+        .output()
+    {
         Ok(out) if out.status.success() => {
             let text = String::from_utf8_lossy(&out.stdout);
+            // `count_lines_containing` vazio conta toda linha não vazia (ex.: um ID por linha).
             let n = text
                 .lines()
-                .filter(|l| l.contains(probe.count_lines_containing))
+                .filter(|l| !l.trim().is_empty() && l.contains(probe.count_lines_containing))
                 .count();
             res.items = Some(n);
             res.note = Some(if n == 0 {
